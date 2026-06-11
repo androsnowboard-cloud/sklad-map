@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Карта склада</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1e2330; color: #e8eaf0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 14px; background: #272d3d; border-bottom: 1px solid #3a4258; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin-right: 8px; white-space: nowrap; }
+  input[type=search] { flex: 1; min-width: 160px; padding: 8px 12px; border-radius: 8px; border: 1px solid #3a4258; background: #1e2330; color: #e8eaf0; font-size: 14px; }
+  button { padding: 7px 11px; border-radius: 8px; border: 1px solid #3a4258; background: #323a4f; color: #e8eaf0; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  button:hover { background: #3e4760; }
+  button.primary { background: #3b6df0; border-color: #3b6df0; }
+  button.primary:hover { background: #5483ff; }
+  #tabs { display: flex; gap: 4px; padding: 6px 14px 0; background: #232839; }
+  #tabs button { border-radius: 8px 8px 0 0; border-bottom: none; background: #2a3144; }
+  #tabs button.act { background: #3b6df0; border-color: #3b6df0; font-weight: 700; }
+  #tabs .spacer { flex: 1; }
+  #wrap { flex: 1; display: flex; overflow: hidden; }
+  #mapArea { flex: 1; overflow: auto; position: relative; background: #1a1f2b; }
+  #map { position: relative; }
+  #map svg { position: absolute; left: 0; top: 0; }
+  #map img.bg { position: absolute; left: 0; top: 0; opacity: .9; }
+  .box { position: absolute; width: 38px; height: 28px; background: #b07c3f; border: 1px solid #8a5f2a; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 10px; cursor: grab; user-select: none;
+    box-shadow: 0 2px 5px rgba(0,0,0,.45); color: #fff; z-index: 10; }
+  .box.pallet { background: #4f7d4a; border-color: #3a5f37; }
+  .box.shelf  { background: #5a6db0; border-color: #44528a; width: 58px; height: 20px; }
+  .box.stacked { box-shadow: 2px -2px 0 #8a5f2a, 4px -4px 0 #6e4c22, 0 2px 5px rgba(0,0,0,.45); }
+  .box .cnt { position: absolute; top: -8px; right: -8px; background: #e84d4d; color: #fff; font-size: 10px;
+    border-radius: 9px; padding: 0 4px; border: 1px solid #1a1f2b; }
+  .box .rh { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px; background: #ffd24d;
+    border: 1px solid #8a5f2a; border-radius: 2px; cursor: nwse-resize; display: none; }
+  .box:hover .rh { display: block; }
+  .rm { position: absolute; border: 2px dashed #c2415a; border-radius: 4px; background: rgba(194,65,90,0.07); z-index: 5; cursor: move; }
+  .rm .rmlabel { position: absolute; top: 2px; left: 6px; font-size: 12px; font-weight: 700; color: #c2415a; pointer-events: none; white-space: nowrap; }
+  .rm .rmh { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; background: #c2415a; border-radius: 3px; cursor: nwse-resize; }
+  .txt { position: absolute; color: #1d2cc7; font-weight: 700; cursor: move; user-select: none; z-index: 6;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff; white-space: pre; }
+  .wall { position: absolute; background: #d8dce8; transform-origin: 0 50%; cursor: move; z-index: 7; border-radius: 2px;
+    box-shadow: 0 0 4px rgba(0,0,0,.45); }
+  .wall .we { position: absolute; right: -7px; top: 50%; margin-top: -7px; width: 14px; height: 14px;
+    background: #ffd24d; border: 2px solid #8a8fa3; border-radius: 50%; cursor: crosshair; opacity: 0; }
+  .wall:hover .we { opacity: 1; }
+  .box, .rm, .txt, .wall, .rm .rmh, .wall .we, .box .rh { touch-action: none; }
+  #sync { font-size: 12px; white-space: nowrap; }
+  #sync.ok { color: #6fe06f; } #sync.busy { color: #ffd24d; } #sync.err { color: #ff8080; }
+  .box.hit { outline: 4px solid #ffd24d; animation: blink .7s infinite alternate; z-index: 50; }
+  .box.dim { opacity: .25; }
+  .box.target { outline: 3px solid #6fe06f; }
+  @keyframes blink { from { outline-color: #ffd24d; } to { outline-color: #ff7b3b; } }
+  #panel { width: 330px; background: #272d3d; border-left: 1px solid #3a4258; padding: 14px; overflow-y: auto; display: none; flex-direction: column; gap: 10px; }
+  #panel.open { display: flex; }
+  #panel label { font-size: 12px; color: #99a3c8; }
+  #panel input, #panel textarea, #panel select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #3a4258; background: #1e2330; color: #e8eaf0; font-size: 14px; }
+  #panel textarea { min-height: 160px; resize: vertical; font-family: inherit; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  #stackList { display: flex; flex-direction: column-reverse; gap: 4px; }
+  #stackList .sitem { padding: 7px 10px; border: 1px solid #3a4258; border-radius: 6px; background: #1e2330; cursor: pointer;
+    font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+  #stackList .sitem:hover { background: #323a4f; }
+  #stackList .sitem.sel { border-color: #3b6df0; background: #2a3552; }
+  #stackList .sitem .lvl { color: #7d87ac; font-size: 11px; }
+  #results { position: absolute; left: 14px; top: 14px; background: rgba(30,35,48,.97); border: 1px solid #3a4258; border-radius: 8px;
+    max-width: 340px; max-height: 55%; overflow-y: auto; z-index: 100; display: none; }
+  #results div { padding: 8px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #2c3346; }
+  #results div:hover { background: #323a4f; }
+  #results b { color: #ffd24d; }
+  #results .fl { color: #6fe06f; font-size: 11px; }
+  #hint { font-size: 12px; color: #7d87ac; padding: 4px 14px; background: #232839; }
+  .danger { color: #ff8080; border-color: #6a3a3a; }
+  .room { fill: rgba(90,110,170,0.06); stroke: #56608a; stroke-width: 1.5; }
+  .rlabel { fill: #8d97c4; font-size: 13px; font-weight: 700; }
+  .rarea { fill: #5f6a94; font-size: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📦 Карта склада</h1>
+  <input type="search" id="q" placeholder="Поиск по всем этажам: подшипники, болты М8...">
+  <button class="primary" onclick="addBox('box')">+ Коробка</button>
+  <button onclick="addBox('pallet')">+ Паллета</button>
+  <button onclick="addBox('shelf')">+ Стеллаж</button>
+  <button onclick="addRoom()">+ Помещение</button>
+  <button onclick="addWall()">+ Стена</button>
+  <button onclick="addText()">+ Текст</button>
+  <button onclick="exportData()">⬇ Экспорт</button>
+  <button onclick="document.getElementById('file').click()">⬆ Импорт</button>
+  <span id="sync">…</span>
+  <input type="file" id="file" accept=".json" style="display:none" onchange="importData(this)">
+</header>
+<div id="tabs"></div>
+<div id="hint">Коробка на коробку = стопка (×N) • клик — содержимое, там же поворот и размер • жёлтый уголок при наведении — растянуть мышью • помещения/текст: двойной клик — переименовать, пустое имя — удалить • «Экспорт» = резервная копия</div>
+<div id="wrap">
+  <div id="mapArea">
+    <div id="results"></div>
+    <div id="map"></div>
+  </div>
+  <div id="panel">
+    <label id="stackTitle">Стопка (снизу вверх)</label>
+    <div id="stackList"></div>
+    <hr style="border-color:#3a4258">
+    <label>Номер / название</label>
+    <input id="pName">
+    <label>Тип</label>
+    <select id="pType"><option value="box">Коробка</option><option value="pallet">Паллета</option><option value="shelf">Стеллаж</option></select>
+    <label>Поворот и размер</label>
+    <div class="row">
+      <button onclick="rotCur(-15)">↺ 15°</button>
+      <button onclick="rotCur(15)">↻ 15°</button>
+      <button onclick="rotCur(90)">↻ 90°</button>
+    </div>
+    <div class="row">
+      <div><label>Ширина, px</label><input id="pW" type="number" min="14"></div>
+      <div><label>Высота, px</label><input id="pH" type="number" min="14"></div>
+    </div>
+    <label>Содержимое (каждая позиция с новой строки)</label>
+    <textarea id="pItems" placeholder="болты М8 — 2 кор.
+подшипники 6204 — 40 шт"></textarea>
+    <div class="row">
+      <button class="primary" onclick="savePanel()">Сохранить</button>
+      <button onclick="closePanel()">Закрыть</button>
+    </div>
+    <button onclick="unstackCurrent()" id="unstackBtn">⤴ Снять со стопки</button>
+    <button class="danger" onclick="deleteCurrent()">Удалить объект</button>
+  </div>
+</div>
+<script>
+const LS = 'sklad-map-v2';
+const S = 20; // px на метр
+
+// Планы этажей: [номер, площадь, x, y, ширина, высота] в метрах (схема приблизительная, по обмерным планам)
+const PLANS = {
+  p: { name: 'Подвал', w: 16, h: 21, rooms: [
+    [1,'108.0', 3.0,1.0, 10.4,10.75], [2,'20.3', 0.2,11.85, 5.8,3.5], [3,'14.6', 0.8,15.35, 4.3,3.4],
+    [4,'24.1', 6.0,11.85, 4.55,5.3], ['лест.','', 13.5,1.0, 1.8,2.5],
+  ]},
+  f1: { name: '1 этаж', w: 55, h: 13, rooms: [
+    [6,'20.6', 0,0, 5.6,3.7], [5,'23.7', 5.6,0, 4.6,5.2], [23,'24.7 лест.', 10.2,0, 5.1,4.9], [22,'16.6', 15.4,0, 4.1,4.0],
+    [7,'3.8', 0,3.7, 1.9,2.0], [8,'17.6', 0,5.8, 4.6,3.8], [24,'20.5', 4.7,3.8, 4.9,1.9],
+    [12,'10.3', 4.6,5.8, 3.25,3.2], [13,'5.9', 7.9,5.8, 1.8,3.3], [21,'29.0', 9.7,5.0, 5.0,5.8],
+    [1,'вход', 14.8,5.0, 2.0,3.0], [14,'36.9', 17.0,4.7, 4.85,7.6], [20,'15.2 кор.', 21.9,4.7, 1.8,8.0],
+    [18,'14.0', 23.8,4.7, 3.88,3.6], [19,'16.1', 23.8,8.4, 4.46,3.6], [17,'34.7', 27.8,4.7, 5.63,6.2],
+    [15,'102.4', 33.5,0.5, 20.9,4.9], [16,'83.3', 39.0,5.6, 14.8,5.6],
+  ]},
+  f2: { name: '2 этаж', w: 55, h: 14, rooms: [
+    [12,'14.6', 0,0, 3.85,3.8], [13,'12.5', 3.85,0, 3.3,3.8], [14,'12.7', 7.15,0, 3.35,3.8],
+    [15,'13.6', 10.5,0, 3.6,3.8], [16,'12.2', 14.1,0, 3.2,3.8], [17,'12.2', 17.3,0, 3.2,3.8],
+    [18,'13.1', 20.5,0, 3.45,3.8], [29,'18.2', 23.95,0, 4.8,3.8],
+    [19,'48.7 кор.', 0,3.9, 26.8,1.85], [11,'кор.', 0,5.85, 1.85,4.2],
+    [10,'35.3', 1.85,5.85, 7.35,4.8], [9,'14.2', 9.2,5.85, 2.95,4.8], [8,'66.2', 12.15,5.85, 13.8,4.8],
+    [7,'20.8', 26.0,5.85, 4.7,4.4], [28,'21.2', 28.85,0, 5.0,4.2], [27,'16.8', 33.95,0, 3.66,4.58],
+    [26,'5.2', 37.7,0, 2.0,2.6], ['л.','', 37.7,2.7, 2.0,2.0], [20,'24.3 кор.', 30.0,4.7, 12.8,1.9],
+    [1,'23.7', 39.8,0, 4.85,4.6], [2,'20.6', 44.75,0, 4.65,4.4], [3,'18.2', 44.0,6.7, 5.18,3.52],
+    [4,'9.6', 40.5,6.7, 3.4,2.73], [5,'6.9', 38.5,6.7, 1.95,2.73], [6,'6.6', 36.0,6.7, 2.45,2.73],
+    [21,'29.0', 30.5,6.7, 5.0,3.5],
+  ]},
+};
+
+function freshData(){
+  return { v:2, seq:0, cur:'f1',
+    floors: { p:{boxes:[],bgImg:null}, f1:{boxes:[],bgImg:null}, f2:{boxes:[],bgImg:null} } };
+}
+let data = JSON.parse(localStorage.getItem(LS) || 'null') || freshData();
+// миграция со старой версии
+const old = JSON.parse(localStorage.getItem('sklad-map-v1') || 'null');
+if (old && !localStorage.getItem(LS)) {
+  data.floors.f1.boxes = (old.boxes||[]).map(b => ({...b, on:null}));
+  data.seq = old.seq||0; save();
+}
+
+let current = null; // выбранная коробка
+const map = document.getElementById('map');
+
+// --- облачная синхронизация (Supabase) ---
+const SUPA = 'https://ptvwofbndymayyknahrf.supabase.co';
+const SUPA_KEY = 'sb_publishable_grw9oPu3r3XniifREgKiBQ_5wPToUyC';
+let SKLAD_TOKEN = localStorage.getItem('sklad-token') || '';
+function askToken(){
+  const t = prompt('Введите ключ доступа к складу (спросите у администратора):', '');
+  if(t && t.trim()){ SKLAD_TOKEN = t.trim(); localStorage.setItem('sklad-token', SKLAD_TOKEN); pullRemote(true); }
+  else syncUi('err', '⚠ нет ключа — данные только в этом браузере');
+}
+let pushTimer = null, lastSynced = '', pushing = false;
+function syncUi(cls, txt){ const s = document.getElementById('sync'); s.className = cls; s.textContent = txt; }
+async function rpc(fn, body){
+  const r = await fetch(`${SUPA}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY },
+    body: JSON.stringify(body)
+  });
+  if(!r.ok) throw new Error('http ' + r.status);
+  return r.json();
+}
+function schedulePush(){
+  clearTimeout(pushTimer);
+  syncUi('busy', '⏳ сохранение…');
+  pushTimer = setTimeout(pushNow, 1200);
+}
+async function pushNow(){
+  clearTimeout(pushTimer); pushTimer = null;
+  if(!SKLAD_TOKEN){ syncUi('err', '⚠ нет ключа — данные только в этом браузере'); return; }
+  pushing = true;
+  try {
+    data.ts = Date.now();
+    const payload = JSON.stringify(data);
+    const ok = await rpc('sklad_set', { p_token: SKLAD_TOKEN, p_data: data });
+    if(ok !== true) throw new Error('token');
+    lastSynced = payload;
+    syncUi('ok', '✓ сохранено');
+  } catch(e){ syncUi('err', '⚠ нет связи — данные в этом браузере'); }
+  pushing = false;
+}
+async function pullRemote(initial){
+  if(!SKLAD_TOKEN) return;
+  try {
+    const remote = await rpc('sklad_get', { p_token: SKLAD_TOKEN });
+    if(remote && remote.floors){
+      const rs = JSON.stringify(remote);
+      const haveLocalChanges = pushTimer && !initial;
+      if(!haveLocalChanges && !pushing && rs !== JSON.stringify(data) && (remote.ts||0) >= (data.ts||0)){
+        data = remote;
+        localStorage.setItem(LS, JSON.stringify(data));
+        renderAll();
+      }
+      lastSynced = rs;
+      if(!pushTimer) syncUi('ok', '✓ синхронизировано');
+    } else if(initial && remote === null){ syncUi('err', '⚠ неверный ключ'); localStorage.removeItem('sklad-token'); SKLAD_TOKEN=''; askToken(); }
+    else if(initial){ // в облаке пусто — заливаем локальные данные
+      pushNow();
+    }
+  } catch(e){ if(initial) syncUi('err', '⚠ офлайн-режим'); }
+}
+setInterval(() => pullRemote(false), 12000);
+
+function save(){ localStorage.setItem(LS, JSON.stringify(data)); schedulePush(); }
+function fl(){ const f = data.floors[data.cur]; f.rooms = f.rooms||[]; f.texts = f.texts||[]; f.walls = f.walls||[]; return f; }
+const DEF = { box:[38,28], pallet:[38,28], shelf:[58,20] };
+function bw(b){ return b.w || DEF[b.type][0]; }
+function bh(b){ return b.h || DEF[b.type][1]; }
+function allBoxes(){ return Object.keys(data.floors).flatMap(k => data.floors[k].boxes.map(b => ({...b, _fl:k}))); }
+function byId(id){ for(const k in data.floors){ const b = data.floors[k].boxes.find(x=>x.id===id); if(b) return b; } return null; }
+
+// --- стопки ---
+function chainUp(b){ // вся стопка от корня вверх
+  const boxes = fl().boxes;
+  let root = b; const seen = new Set();
+  while(root.on != null && !seen.has(root.id)){ seen.add(root.id); const p = boxes.find(x=>x.id===root.on); if(!p) { root.on=null; break; } root = p; }
+  const chain = [root];
+  let cur = root;
+  while(true){ const child = boxes.find(x=>x.on===cur.id); if(!child) break; chain.push(child); cur = child; }
+  return chain;
+}
+function isRoot(b){ return b.on == null; }
+
+// --- вкладки ---
+function renderTabs(){
+  const t = document.getElementById('tabs');
+  t.innerHTML = '';
+  for(const k of ['p','f1','f2']){
+    const n = data.floors[k].boxes.length;
+    const btn = document.createElement('button');
+    btn.className = k===data.cur ? 'act' : '';
+    btn.textContent = PLANS[k].name + (n ? ` (${n})` : '');
+    btn.onclick = () => { data.cur = k; save(); renderAll(); };
+    t.appendChild(btn);
+  }
+  const sp = document.createElement('div'); sp.className='spacer'; t.appendChild(sp);
+  const bg = document.createElement('button');
+  bg.textContent = '🖼 Фон: фото плана';
+  bg.onclick = () => document.getElementById('bgfile').click();
+  t.appendChild(bg);
+  const bi = document.createElement('input'); bi.type='file'; bi.id='bgfile'; bi.accept='image/*'; bi.style.display='none';
+  bi.onchange = function(){ const f=this.files[0]; if(!f) return; const r=new FileReader();
+    r.onload = e => { fl().bgImg = e.target.result; save(); renderAll(); }; r.readAsDataURL(f); this.value=''; };
+  t.appendChild(bi);
+}
+
+function planSVG(key){
+  const p = PLANS[key];
+  const W = p.w*S+40, H = p.h*S+40;
+  let s = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">`;
+  for(const [num, area, x, y, w, h] of p.rooms){
+    const X=x*S+20, Y=y*S+20, Wr=w*S, Hr=h*S;
+    s += `<rect class="room" x="${X}" y="${Y}" width="${Wr}" height="${Hr}" rx="3"/>`;
+    s += `<text class="rlabel" x="${X+6}" y="${Y+17}">${num}</text>`;
+    if(area) s += `<text class="rarea" x="${X+6}" y="${Y+30}">${area}</text>`;
+  }
+  s += `<text x="${20}" y="${H-8}" fill="#4d5677" font-size="11">${p.name} — схема приблизительная (М по обмерному плану)</text></svg>`;
+  return { svg: s, W, H };
+}
+
+function renderAll(){ renderTabs(); render(); }
+
+const PLAN_IMG = { p: "", f1: "", f2: "" };
+
+function render(){
+  map.innerHTML = '';
+  const f = fl();
+  const bg = f.bgImg || PLAN_IMG[data.cur];
+  if(bg && bg.startsWith('data:')){
+    const img = document.createElement('img'); img.className='bg'; img.src = bg;
+    img.onload = () => { map.style.width = Math.max(img.naturalWidth, 1200)+'px'; map.style.height = Math.max(img.naturalHeight, 800)+'px'; };
+    map.appendChild(img);
+    map.style.width = '1600px'; map.style.height = '1200px';
+  } else {
+    map.style.width = '2200px'; map.style.height = '1400px';
+    map.style.backgroundImage = 'linear-gradient(#242a3a 1px, transparent 1px), linear-gradient(90deg, #242a3a 1px, transparent 1px)';
+    map.style.backgroundSize = '25px 25px';
+  }
+  if(bg && bg.startsWith('data:')) { map.style.backgroundImage = 'none'; }
+  // помещения (нарисованные от руки)
+  f.rooms.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'rm';
+    el.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`;
+    el.innerHTML = `<span class="rmlabel">${esc(r.name)}</span><span class="rmh"></span>`;
+    el.ondblclick = e => { e.stopPropagation();
+      const n = prompt('Название помещения (пусто — удалить):', r.name);
+      if(n===null) return;
+      if(n==='') f.rooms = data.floors[data.cur].rooms = f.rooms.filter(x=>x!==r); else r.name = n;
+      save(); render(); };
+    dragGeneric(el, r, el.querySelector('.rmh'));
+    map.appendChild(el);
+  });
+  // стены
+  f.walls.forEach(w => {
+    const el = document.createElement('div');
+    el.className = 'wall';
+    el.style.cssText = `left:${w.x}px;top:${w.y - (w.th||5)/2}px;width:${w.len}px;height:${w.th||5}px;transform:rotate(${w.ang||0}deg)`;
+    const we = document.createElement('span'); we.className = 'we'; el.appendChild(we);
+    el.ondblclick = e => { e.stopPropagation();
+      const t = prompt('Толщина стены, px (пусто — удалить):', w.th||5);
+      if(t===null) return;
+      if(t==='') data.floors[data.cur].walls = f.walls.filter(x=>x!==w); else w.th = Math.max(2, parseInt(t)||5);
+      save(); render(); };
+    el.onpointerdown = e => {
+      const mr = map.getBoundingClientRect();
+      if(e.target === we){ // тянем конец: длина + угол
+        const mm = e2 => {
+          const px = e2.clientX - mr.left, py = e2.clientY - mr.top;
+          w.len = Math.max(10, Math.hypot(px - w.x, py - w.y));
+          w.ang = Math.atan2(py - w.y, px - w.x) * 180 / Math.PI;
+          if(e2.shiftKey) w.ang = Math.round(w.ang / 15) * 15; // Shift — шаг 15°
+          el.style.width = w.len+'px'; el.style.transform = `rotate(${w.ang}deg)`;
+        };
+        const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); save(); };
+        document.addEventListener('pointermove', mm); document.addEventListener('pointerup', mu);
+      } else { // перенос целиком
+        const sx = e.clientX, sy = e.clientY, ox = w.x, oy = w.y;
+        const mm = e2 => {
+          w.x = ox + e2.clientX - sx; w.y = oy + e2.clientY - sy;
+          el.style.left = w.x+'px'; el.style.top = (w.y - (w.th||5)/2)+'px';
+        };
+        const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); save(); };
+        document.addEventListener('pointermove', mm); document.addEventListener('pointerup', mu);
+      }
+      e.preventDefault();
+    };
+    map.appendChild(el);
+  });
+  // текстовые подписи
+  f.texts.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'txt';
+    el.style.cssText = `left:${t.x}px;top:${t.y}px;font-size:${t.size||14}px`;
+    el.textContent = t.text;
+    el.ondblclick = e => { e.stopPropagation();
+      const n = prompt('Текст (пусто — удалить):', t.text);
+      if(n===null) return;
+      if(n==='') data.floors[data.cur].texts = f.texts.filter(x=>x!==t); else t.text = n;
+      save(); render(); };
+    dragGeneric(el, t, null);
+    map.appendChild(el);
+  });
+  // только корни стопок рисуем как элементы
+  f.boxes.filter(isRoot).forEach(root => {
+    const chain = chainUp(root);
+    const el = document.createElement('div');
+    el.className = 'box ' + root.type + (chain.length>1 ? ' stacked' : '');
+    el.style.cssText = `left:${root.x}px;top:${root.y}px;width:${bw(root)}px;height:${bh(root)}px;transform:rotate(${root.rot||0}deg)`;
+    el.textContent = root.name;
+    el.dataset.id = root.id;
+    if(chain.length>1){
+      const c = document.createElement('span'); c.className='cnt'; c.textContent = '×'+chain.length; el.appendChild(c);
+      el.title = 'Стопка: ' + chain.map(b=>b.name).join(' → ');
+    }
+    const rh = document.createElement('span'); rh.className='rh'; el.appendChild(rh);
+    el.onclick = e => { if(el._moved || e.target===rh) return; openPanel(root); };
+    dragBox(el, root, rh);
+    map.appendChild(el);
+  });
+  applySearch();
+}
+
+function dragGeneric(el, obj, handle){
+  el.onpointerdown = e => {
+    const resizing = handle && e.target === handle;
+    const sx = e.clientX, sy = e.clientY;
+    const ox = resizing ? obj.w : obj.x, oy = resizing ? obj.h : obj.y;
+    const mm = e2 => {
+      const dx = e2.clientX-sx, dy = e2.clientY-sy;
+      if(resizing){ obj.w = Math.max(40, ox+dx); obj.h = Math.max(30, oy+dy);
+        el.style.width = obj.w+'px'; el.style.height = obj.h+'px'; }
+      else { obj.x = Math.max(0, ox+dx); obj.y = Math.max(0, oy+dy);
+        el.style.left = obj.x+'px'; el.style.top = obj.y+'px'; }
+    };
+    const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); save(); };
+    document.addEventListener('pointermove', mm);
+    document.addEventListener('pointerup', mu);
+    e.preventDefault();
+  };
+}
+
+function addRoom(){
+  const name = prompt('Название помещения:', 'Комната');
+  if(!name) return;
+  const area = document.getElementById('mapArea');
+  fl().rooms.push({ name, x: area.scrollLeft+100, y: area.scrollTop+100, w: 220, h: 150 });
+  save(); render();
+}
+function addWall(){
+  const area = document.getElementById('mapArea');
+  fl().walls.push({ x: area.scrollLeft+120, y: area.scrollTop+120, len: 150, ang: 0, th: 5 });
+  save(); render();
+}
+function addText(){
+  const text = prompt('Текст подписи:', '');
+  if(!text) return;
+  const area = document.getElementById('mapArea');
+  fl().texts.push({ text, x: area.scrollLeft+120, y: area.scrollTop+120, size: 16 });
+  save(); render();
+}
+function rotCur(deg){
+  if(!current) return;
+  current.rot = ((current.rot||0) + deg + 360) % 360;
+  save(); render(); openPanel(current);
+}
+
+function dragBox(el, root, rh){
+  el.onpointerdown = e => {
+    if(rh && e.target === rh){ // изменение размера
+      const sx = e.clientX, sy = e.clientY, ow = bw(root), oh = bh(root);
+      const mm = e2 => {
+        root.w = Math.max(14, ow + e2.clientX - sx);
+        root.h = Math.max(14, oh + e2.clientY - sy);
+        el.style.width = root.w+'px'; el.style.height = root.h+'px';
+      };
+      const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); save(); render(); };
+      document.addEventListener('pointermove', mm);
+      document.addEventListener('pointerup', mu);
+      e.preventDefault(); return;
+    }
+    const sx = e.clientX, sy = e.clientY, ox = root.x, oy = root.y;
+    el._moved = false;
+    let over = null;
+    const mm = e2 => {
+      const dx = e2.clientX-sx, dy = e2.clientY-sy;
+      if(Math.abs(dx)+Math.abs(dy) > 3) el._moved = true;
+      root.x = Math.max(0, ox+dx); root.y = Math.max(0, oy+dy);
+      el.style.left = root.x+'px'; el.style.top = root.y+'px';
+      // подсветка цели для штабеля
+      document.querySelectorAll('.box.target').forEach(t=>t.classList.remove('target'));
+      over = null;
+      const r1 = el.getBoundingClientRect();
+      for(const other of map.querySelectorAll('.box')){
+        if(other === el) continue;
+        const r2 = other.getBoundingClientRect();
+        if(r1.left < r2.right-8 && r1.right > r2.left+8 && r1.top < r2.bottom-6 && r1.bottom > r2.top+6){
+          other.classList.add('target'); over = other; break;
+        }
+      }
+    };
+    const mu = () => {
+      document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu);
+      document.querySelectorAll('.box.target').forEach(t=>t.classList.remove('target'));
+      if(el._moved && over){
+        const targetRoot = fl().boxes.find(b => b.id == over.dataset.id);
+        const tChain = chainUp(targetRoot), myChain = chainUp(root);
+        if(!myChain.some(b => tChain.includes(b))){
+          root.on = tChain[tChain.length-1].id; // моя стопка встаёт на верх целевой
+          root.x = targetRoot.x; root.y = targetRoot.y;
+        }
+      }
+      save();
+      if(el._moved) render(); // без движения не перерисовываем, иначе click не успевает открыть панель
+    };
+    document.addEventListener('pointermove', mm);
+    document.addEventListener('pointerup', mu);
+    e.preventDefault();
+  };
+}
+
+function addBox(type){
+  data.seq++;
+  const area = document.getElementById('mapArea');
+  const b = { id: data.seq, type, name: (type==='shelf'?'СТ-':type==='pallet'?'П-':'К-') + data.seq,
+    x: area.scrollLeft + 80 + (data.seq%6)*78, y: area.scrollTop + 80 + (data.seq%4)*58, items: '', on: null };
+  fl().boxes.push(b);
+  save(); renderAll();
+  openPanel(b);
+}
+
+// --- панель ---
+function openPanel(b){
+  current = b;
+  const chain = chainUp(b);
+  const sl = document.getElementById('stackList');
+  sl.innerHTML = '';
+  document.getElementById('stackTitle').textContent = chain.length>1 ? `Стопка из ${chain.length} (снизу вверх)` : 'Объект';
+  chain.forEach((cb, i) => {
+    const d = document.createElement('div');
+    d.className = 'sitem' + (cb===current ? ' sel' : '');
+    d.innerHTML = `<span>${esc(cb.name)}</span><span class="lvl">ярус ${i+1}</span>`;
+    d.onclick = () => openPanel(cb);
+    sl.appendChild(d);
+  });
+  document.getElementById('pName').value = b.name;
+  document.getElementById('pType').value = b.type;
+  document.getElementById('pW').value = bw(b);
+  document.getElementById('pH').value = bh(b);
+  document.getElementById('pItems').value = b.items;
+  document.getElementById('unstackBtn').style.display = (chain.length>1) ? '' : 'none';
+  document.getElementById('panel').classList.add('open');
+}
+function closePanel(){ document.getElementById('panel').classList.remove('open'); current = null; }
+function savePanel(){
+  if(!current) return;
+  current.name = document.getElementById('pName').value.trim() || current.name;
+  current.type = document.getElementById('pType').value;
+  current.w = Math.max(14, parseInt(document.getElementById('pW').value) || bw(current));
+  current.h = Math.max(14, parseInt(document.getElementById('pH').value) || bh(current));
+  current.items = document.getElementById('pItems').value;
+  save(); render(); openPanel(current);
+}
+function unstackCurrent(){
+  if(!current) return;
+  const boxes = fl().boxes;
+  const child = boxes.find(x => x.on === current.id);
+  if(child) child.on = current.on; // стопка над снятой коробкой опускается
+  const root = chainUp(current)[0];
+  current.on = null;
+  current.x = root.x + 90; current.y = root.y + 30;
+  save(); render(); openPanel(current);
+}
+function deleteCurrent(){
+  if(!current) return;
+  if(!confirm('Удалить «' + current.name + '»? Содержимое будет потеряно.')) return;
+  const boxes = fl().boxes;
+  const child = boxes.find(x => x.on === current.id);
+  if(child) child.on = current.on;
+  data.floors[data.cur].boxes = boxes.filter(b => b !== current);
+  save(); renderAll(); closePanel();
+}
+
+function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// --- поиск по всем этажам ---
+const qEl = document.getElementById('q'), resEl = document.getElementById('results');
+qEl.oninput = applySearch;
+function applySearch(){
+  const q = qEl.value.trim().toLowerCase();
+  resEl.innerHTML = ''; resEl.style.display = 'none';
+  const els = map.querySelectorAll('.box');
+  if(!q){ els.forEach(e => e.classList.remove('hit','dim')); return; }
+  const hits = allBoxes().filter(b => (b.name + ' ' + b.items).toLowerCase().includes(q));
+  // подсветка на текущем этаже: подсвечиваем корень стопки, где лежит найденная
+  const hitRoots = new Set();
+  for(const h of hits){ if(h._fl !== data.cur) continue;
+    const b = fl().boxes.find(x=>x.id===h.id);
+    hitRoots.add(String(chainUp(b)[0].id));
+  }
+  els.forEach(e => { e.classList.toggle('hit', hitRoots.has(e.dataset.id)); e.classList.toggle('dim', !hitRoots.has(e.dataset.id)); });
+  if(hits.length){
+    resEl.style.display = 'block';
+    hits.forEach(h => {
+      const realBox = data.floors[h._fl].boxes.find(x=>x.id===h.id);
+      const savedCur = data.cur; data.cur = h._fl;
+      const chain = chainUp(realBox);
+      data.cur = savedCur;
+      const lvl = chain.indexOf(realBox);
+      const line = (h.items.split('\n').find(l => l.toLowerCase().includes(q)) || '').trim();
+      const stackInfo = chain.length>1 ? ` · ярус ${lvl+1} из ${chain.length}` : '';
+      const d = document.createElement('div');
+      d.innerHTML = `<span class="fl">${PLANS[h._fl].name}</span> <b>${esc(h.name)}</b>${stackInfo}${line ? '<br>' + esc(line) : ''}`;
+      d.onclick = () => {
+        if(data.cur !== h._fl){ data.cur = h._fl; save(); renderAll(); }
+        const root = chainUp(data.floors[h._fl].boxes.find(x=>x.id===h.id))[0];
+        const area = document.getElementById('mapArea');
+        area.scrollTo({ left: root.x - area.clientWidth/2, top: root.y - area.clientHeight/2, behavior: 'smooth' });
+      };
+      resEl.appendChild(d);
+    });
+  }
+}
+
+function exportData(){
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'склад-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+}
+function importData(inp){
+  const f = inp.files[0]; if(!f) return;
+  f.text().then(t => {
+    try { const d = JSON.parse(t); if(!d.floors) throw 0; data = d; save(); renderAll();
+      alert('Импортировано. Коробок: ' + allBoxes().length); }
+    catch { alert('Не удалось прочитать файл'); }
+    inp.value = '';
+  });
+}
+
+renderAll();
+if(SKLAD_TOKEN) pullRemote(true); else askToken();
+if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
+</script>
+</body>
+</html>
