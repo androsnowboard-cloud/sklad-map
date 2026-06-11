@@ -177,6 +177,9 @@ const map = document.getElementById('map');
 // --- облачная синхронизация (Supabase) ---
 const SUPA = 'https://ptvwofbndymayyknahrf.supabase.co';
 const SUPA_KEY = 'sb_publishable_grw9oPu3r3XniifREgKiBQ_5wPToUyC';
+// ключ может приехать в адресе (#k=...) — например, из кнопки телеграм-бота
+const hashKey = (location.hash.match(/k=([a-f0-9]+)/) || [])[1];
+if(hashKey){ localStorage.setItem('sklad-token', hashKey); history.replaceState(null, '', location.pathname + location.search); }
 let SKLAD_TOKEN = localStorage.getItem('sklad-token') || '';
 function askToken(){
   const t = prompt('Введите ключ доступа к складу (спросите у администратора):', '');
