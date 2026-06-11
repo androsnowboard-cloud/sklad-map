@@ -202,38 +202,67 @@ function schedulePush(){
   syncUi('busy', '⏳ сохранение…');
   pushTimer = setTimeout(pushNow, 1200);
 }
+// Слияние: коробки сравниваются по id, побеждает более свежая правка (поле m).
+// Удаления хранятся как «надгробия» в data.del, чтобы удалённая коробка не воскресала.
+function mergeDel(a, b){ const r = {...(a||{})}; for(const k in (b||{})) r[k] = Math.max(r[k]||0, b[k]); return r; }
+function mergeData(remote){
+  if(!remote || !remote.floors) return false;
+  const before = JSON.stringify(data);
+  data.del = mergeDel(data.del, remote.del);
+  const remoteNewer = (remote.ts||0) > (data.ts||0);
+  for(const k of ['p','f1','f2']){
+    const lf = data.floors[k] = data.floors[k] || {boxes:[]};
+    lf.boxes = lf.boxes || [];
+    const rf = remote.floors[k] || {};
+    const map = new Map(lf.boxes.map(b => [String(b.id), b]));
+    (rf.boxes||[]).forEach(rb => {
+      const lb = map.get(String(rb.id));
+      if(!lb) lf.boxes.push(rb);
+      else if((rb.m||0) > (lb.m||0)) Object.assign(lb, rb);
+    });
+    lf.boxes = lf.boxes.filter(b => !((data.del[b.id]||0) > (b.m||0)));
+    if(remoteNewer){ // планировка и подписи — последняя версия целиком
+      if(rf.rooms) lf.rooms = rf.rooms;
+      if(rf.walls) lf.walls = rf.walls;
+      if(rf.texts) lf.texts = rf.texts;
+      if(rf.bgImg !== undefined) lf.bgImg = rf.bgImg;
+    }
+  }
+  if(remoteNewer) data.ts = remote.ts;
+  if((remote.seq||0) > (data.seq||0)) data.seq = remote.seq;
+  const after = JSON.stringify(data);
+  if(after !== before){ localStorage.setItem(LS, after); return true; }
+  return false;
+}
 async function pushNow(){
   clearTimeout(pushTimer); pushTimer = null;
   if(!SKLAD_TOKEN){ syncUi('err', '⚠ нет ключа — данные только в этом браузере'); return; }
   pushing = true;
   try {
+    // сначала забираем чужие правки и сливаем, потом отправляем объединённое
+    const remote = await rpc('sklad_get', { p_token: SKLAD_TOKEN });
+    if(remote === null) throw new Error('token');
+    if(mergeData(remote)) renderAll();
     data.ts = Date.now();
-    const payload = JSON.stringify(data);
     const ok = await rpc('sklad_set', { p_token: SKLAD_TOKEN, p_data: data });
     if(ok !== true) throw new Error('token');
-    lastSynced = payload;
+    localStorage.setItem(LS, JSON.stringify(data));
     syncUi('ok', '✓ сохранено');
   } catch(e){ syncUi('err', '⚠ нет связи — данные в этом браузере'); }
   pushing = false;
 }
 async function pullRemote(initial){
-  if(!SKLAD_TOKEN) return;
+  if(!SKLAD_TOKEN || pushing) return;
   try {
     const remote = await rpc('sklad_get', { p_token: SKLAD_TOKEN });
-    if(remote && remote.floors){
-      const rs = JSON.stringify(remote);
-      const haveLocalChanges = pushTimer && !initial;
-      if(!haveLocalChanges && !pushing && rs !== JSON.stringify(data) && (remote.ts||0) >= (data.ts||0)){
-        data = remote;
-        localStorage.setItem(LS, JSON.stringify(data));
-        renderAll();
-      }
-      lastSynced = rs;
-      if(!pushTimer) syncUi('ok', '✓ синхронизировано');
-    } else if(initial && remote === null){ syncUi('err', '⚠ неверный ключ'); localStorage.removeItem('sklad-token'); SKLAD_TOKEN=''; askToken(); }
-    else if(initial){ // в облаке пусто — заливаем локальные данные
-      pushNow();
+    if(remote === null){
+      if(initial){ syncUi('err', '⚠ неверный ключ'); localStorage.removeItem('sklad-token'); SKLAD_TOKEN=''; askToken(); }
+      return;
     }
+    if(remote && remote.floors){
+      if(mergeData(remote)) renderAll();
+      if(!pushTimer) syncUi('ok', '✓ синхронизировано');
+    } else if(initial){ pushNow(); } // в облаке пусто — заливаем локальные данные
   } catch(e){ if(initial) syncUi('err', '⚠ офлайн-режим'); }
 }
 setInterval(() => pullRemote(false), 12000);
@@ -439,6 +468,7 @@ function addText(){
 function rotCur(deg){
   if(!current) return;
   current.rot = ((current.rot||0) + deg + 360) % 360;
+  current.m = Date.now();
   save(); render(); openPanel(current);
 }
 
@@ -451,7 +481,7 @@ function dragBox(el, root, rh){
         root.h = Math.max(14, oh + e2.clientY - sy);
         el.style.width = root.w+'px'; el.style.height = root.h+'px';
       };
-      const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); save(); render(); };
+      const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); root.m = Date.now(); save(); render(); };
       document.addEventListener('pointermove', mm);
       document.addEventListener('pointerup', mu);
       e.preventDefault(); return;
@@ -487,6 +517,7 @@ function dragBox(el, root, rh){
           root.x = targetRoot.x; root.y = targetRoot.y;
         }
       }
+      if(el._moved) root.m = Date.now();
       save();
       if(el._moved) render(); // без движения не перерисовываем, иначе click не успевает открыть панель
     };
@@ -499,7 +530,9 @@ function dragBox(el, root, rh){
 function addBox(type){
   data.seq++;
   const area = document.getElementById('mapArea');
-  const b = { id: data.seq, type, name: (type==='shelf'?'СТ-':type==='pallet'?'П-':'К-') + data.seq,
+  // id должен быть уникален между устройствами, поэтому не используем счётчик
+  const b = { id: 'b' + Date.now() + Math.random().toString(36).slice(2,6), m: Date.now(),
+    type, name: (type==='shelf'?'СТ-':type==='pallet'?'П-':'К-') + data.seq,
     x: area.scrollLeft + 80 + (data.seq%6)*78, y: area.scrollTop + 80 + (data.seq%4)*58, items: '', on: null };
   fl().boxes.push(b);
   save(); renderAll();
@@ -536,16 +569,18 @@ function savePanel(){
   current.w = Math.max(14, parseInt(document.getElementById('pW').value) || bw(current));
   current.h = Math.max(14, parseInt(document.getElementById('pH').value) || bh(current));
   current.items = document.getElementById('pItems').value;
+  current.m = Date.now();
   save(); render(); openPanel(current);
 }
 function unstackCurrent(){
   if(!current) return;
   const boxes = fl().boxes;
   const child = boxes.find(x => x.on === current.id);
-  if(child) child.on = current.on; // стопка над снятой коробкой опускается
+  if(child){ child.on = current.on; child.m = Date.now(); } // стопка над снятой коробкой опускается
   const root = chainUp(current)[0];
   current.on = null;
   current.x = root.x + 90; current.y = root.y + 30;
+  current.m = Date.now();
   save(); render(); openPanel(current);
 }
 function deleteCurrent(){
@@ -553,7 +588,8 @@ function deleteCurrent(){
   if(!confirm('Удалить «' + current.name + '»? Содержимое будет потеряно.')) return;
   const boxes = fl().boxes;
   const child = boxes.find(x => x.on === current.id);
-  if(child) child.on = current.on;
+  if(child){ child.on = current.on; child.m = Date.now(); }
+  (data.del = data.del || {})[current.id] = Date.now(); // надгробие, чтобы не воскресла при слиянии
   data.floors[data.cur].boxes = boxes.filter(b => b !== current);
   save(); renderAll(); closePanel();
 }
