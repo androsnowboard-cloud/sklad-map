@@ -72,6 +72,7 @@
   #stackList .sitem.sel { border-color: #3b6df0; background: #2a3552; }
   #stackList .sitem .lvl { color: #7d87ac; font-size: 11px; }
   #stackList .shhdr { font-size: 11px; color: #8d97c4; margin-top: 6px; border-bottom: 1px solid #3a4258; padding-bottom: 2px; }
+  #stackList textarea { min-height: 44px !important; font-size: 12px; }
   #stackList .empty { font-size: 11px; color: #5f6a94; padding: 2px 10px; }
   #results { position: absolute; left: 14px; top: 14px; background: rgba(30,35,48,.97); border: 1px solid #3a4258; border-radius: 8px;
     max-width: 340px; max-height: 55%; overflow-y: auto; z-index: 100; display: none; }
@@ -119,9 +120,6 @@
     <select id="pType"><option value="box">Коробка</option><option value="pallet">Паллета</option><option value="shelf">Стеллаж</option></select>
     <div class="row" id="lvlsRow" style="display:none">
       <div><label>Полок на стеллаже</label><input id="pLevels" type="number" min="1" max="10"></div>
-    </div>
-    <div class="row" id="lvlRow" style="display:none">
-      <div><label>Полка №</label><select id="pLvl"></select></div>
     </div>
     <label>Поворот и размер</label>
     <div class="row">
@@ -542,7 +540,7 @@ function dragBox(el, root, rh){
         if(root.type === 'shelf'){
           // стеллаж ни на что не ставим
         } else if(targetRoot.type === 'shelf'){
-          root.on = targetRoot.id; root.shelfLvl = 1; // коробка встаёт на 1-ю полку
+          root.on = targetRoot.id; // коробка встаёт наверх стеллажа
           root.x = targetRoot.x; root.y = targetRoot.y;
         } else {
           const tChain = chainUp(targetRoot), myChain = chainUp(root);
@@ -589,20 +587,27 @@ function openPanel(b){
     const lv = b.levels || 3;
     title.textContent = `Стеллаж — ${lv} полок`;
     const ch = shelfBoxes(b);
+    // коробки наверху стеллажа
+    const h0 = document.createElement('div'); h0.className = 'shhdr'; h0.textContent = 'Наверху стеллажа'; sl.appendChild(h0);
+    if(!ch.length){ const e = document.createElement('div'); e.className='empty'; e.textContent='— пусто (перетащи коробку на стеллаж) —'; sl.appendChild(e); }
+    ch.forEach(cb => {
+      const d = document.createElement('div'); d.className = 'sitem';
+      d.innerHTML = `<span>${esc(cb.name)}</span>`;
+      d.onclick = () => openPanel(cb);
+      sl.appendChild(d);
+    });
+    // полки: свободный текст, что на них лежит
     for(let i = lv; i >= 1; i--){
       const h = document.createElement('div'); h.className = 'shhdr'; h.textContent = 'Полка ' + i; sl.appendChild(h);
-      const onLvl = ch.filter(x => Math.min(x.shelfLvl||1, lv) === i);
-      if(!onLvl.length){ const e = document.createElement('div'); e.className='empty'; e.textContent='— пусто —'; sl.appendChild(e); }
-      onLvl.forEach(cb => {
-        const d = document.createElement('div'); d.className = 'sitem';
-        d.innerHTML = `<span>${esc(cb.name)}</span>`;
-        d.onclick = () => openPanel(cb);
-        sl.appendChild(d);
-      });
+      const ta = document.createElement('textarea');
+      ta.dataset.lvl = i;
+      ta.placeholder = 'что лежит на полке…';
+      ta.value = (b.lvlItems||{})[i] || '';
+      sl.appendChild(ta);
     }
   } else if(onShelf){
     sl.style.flexDirection = 'column';
-    title.textContent = `На стеллаже ${parent.name}, полка ${b.shelfLvl||1}`;
+    title.textContent = `Наверху стеллажа ${parent.name}`;
     const d = document.createElement('div'); d.className = 'sitem';
     d.innerHTML = `<span>↩ ${esc(parent.name)} (весь стеллаж)</span>`;
     d.onclick = () => openPanel(parent);
@@ -629,15 +634,6 @@ function openPanel(b){
   // число полок — только для стеллажа
   document.getElementById('lvlsRow').style.display = b.type==='shelf' ? '' : 'none';
   if(b.type==='shelf') document.getElementById('pLevels').value = b.levels || 3;
-  // выбор полки — только для коробки на стеллаже
-  document.getElementById('lvlRow').style.display = onShelf ? '' : 'none';
-  if(onShelf){
-    const sel = document.getElementById('pLvl');
-    sel.innerHTML = '';
-    const lv = parent.levels || 3;
-    for(let i=1; i<=lv; i++){ const o = document.createElement('option'); o.value=i; o.textContent='Полка '+i; sel.appendChild(o); }
-    sel.value = Math.min(b.shelfLvl||1, lv);
-  }
   const ub = document.getElementById('unstackBtn');
   ub.style.display = canUnstack ? '' : 'none';
   ub.textContent = onShelf ? '⤴ Снять со стеллажа' : '⤴ Снять со стопки';
@@ -651,9 +647,12 @@ function savePanel(){
   current.w = Math.max(14, parseInt(document.getElementById('pW').value) || bw(current));
   current.h = Math.max(14, parseInt(document.getElementById('pH').value) || bh(current));
   current.items = document.getElementById('pItems').value;
-  if(current.type === 'shelf') current.levels = Math.min(10, Math.max(1, parseInt(document.getElementById('pLevels').value) || 3));
-  const par = parentOf(current);
-  if(par && par.type === 'shelf') current.shelfLvl = parseInt(document.getElementById('pLvl').value) || 1;
+  if(current.type === 'shelf'){
+    current.levels = Math.min(10, Math.max(1, parseInt(document.getElementById('pLevels').value) || 3));
+    const li = {};
+    document.querySelectorAll('#stackList textarea').forEach(t => { if(t.value.trim()) li[t.dataset.lvl] = t.value; });
+    current.lvlItems = li;
+  }
   current.m = Date.now();
   save(); render(); openPanel(current);
 }
@@ -700,7 +699,8 @@ function applySearch(){
   resEl.innerHTML = ''; resEl.style.display = 'none';
   const els = map.querySelectorAll('.box');
   if(!q){ els.forEach(e => e.classList.remove('hit','dim')); return; }
-  const hits = allBoxes().filter(b => (b.name + ' ' + b.items).toLowerCase().includes(q));
+  const hay = b => (b.name + ' ' + b.items + ' ' + Object.values(b.lvlItems||{}).join('\n')).toLowerCase();
+  const hits = allBoxes().filter(b => hay(b).includes(q));
   // подсветка на текущем этаже: подсвечиваем корень стопки, где лежит найденная
   const hitRoots = new Set();
   for(const h of hits){ if(h._fl !== data.cur) continue;
@@ -717,9 +717,15 @@ function applySearch(){
       const chain = chainUp(realBox);
       data.cur = savedCur;
       const lvl = chain.indexOf(realBox);
-      const line = (h.items.split('\n').find(l => l.toLowerCase().includes(q)) || '').trim();
-      const stackInfo = (par && par.type==='shelf') ? ` · ${esc(par.name)}, полка ${realBox.shelfLvl||1}`
+      let line = (h.items.split('\n').find(l => l.toLowerCase().includes(q)) || '').trim();
+      let stackInfo = (par && par.type==='shelf') ? ` · наверху ${esc(par.name)}`
         : (chain.length>1 ? ` · ярус ${lvl+1} из ${chain.length}` : '');
+      if(!line && realBox.lvlItems){ // совпадение в тексте полки стеллажа
+        for(const [lv2, txt] of Object.entries(realBox.lvlItems)){
+          const l2 = txt.split('\n').find(l => l.toLowerCase().includes(q));
+          if(l2){ line = l2.trim(); stackInfo = ` · полка ${lv2}`; break; }
+        }
+      }
       const d = document.createElement('div');
       d.innerHTML = `<span class="fl">${PLANS[h._fl].name}</span> <b>${esc(h.name)}</b>${stackInfo}${line ? '<br>' + esc(line) : ''}`;
       d.onclick = () => {
