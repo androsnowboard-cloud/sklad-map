@@ -71,6 +71,8 @@
   #stackList .sitem:hover { background: #323a4f; }
   #stackList .sitem.sel { border-color: #3b6df0; background: #2a3552; }
   #stackList .sitem .lvl { color: #7d87ac; font-size: 11px; }
+  #stackList .shhdr { font-size: 11px; color: #8d97c4; margin-top: 6px; border-bottom: 1px solid #3a4258; padding-bottom: 2px; }
+  #stackList .empty { font-size: 11px; color: #5f6a94; padding: 2px 10px; }
   #results { position: absolute; left: 14px; top: 14px; background: rgba(30,35,48,.97); border: 1px solid #3a4258; border-radius: 8px;
     max-width: 340px; max-height: 55%; overflow-y: auto; z-index: 100; display: none; }
   #results div { padding: 8px 12px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #2c3346; }
@@ -115,6 +117,12 @@
     <input id="pName">
     <label>Тип</label>
     <select id="pType"><option value="box">Коробка</option><option value="pallet">Паллета</option><option value="shelf">Стеллаж</option></select>
+    <div class="row" id="lvlsRow" style="display:none">
+      <div><label>Полок на стеллаже</label><input id="pLevels" type="number" min="1" max="10"></div>
+    </div>
+    <div class="row" id="lvlRow" style="display:none">
+      <div><label>Полка №</label><select id="pLvl"></select></div>
+    </div>
     <label>Поворот и размер</label>
     <div class="row">
       <button onclick="rotCur(-15)">↺ 15°</button>
@@ -289,11 +297,14 @@ function chainUp(b){ // вся стопка от корня вверх
   const boxes = fl().boxes;
   let root = b; const seen = new Set();
   while(root.on != null && !seen.has(root.id)){ seen.add(root.id); const p = boxes.find(x=>x.id===root.on); if(!p) { root.on=null; break; } root = p; }
+  if(root.type === 'shelf') return [root]; // содержимое стеллажа — не цепочка, а полки
   const chain = [root];
   let cur = root;
   while(true){ const child = boxes.find(x=>x.on===cur.id); if(!child) break; chain.push(child); cur = child; }
   return chain;
 }
+function shelfBoxes(shelf){ return fl().boxes.filter(x => x.on === shelf.id); }
+function parentOf(b){ return b.on != null ? fl().boxes.find(x => x.id === b.on) : null; }
 function isRoot(b){ return b.on == null; }
 
 // --- вкладки ---
@@ -418,15 +429,23 @@ function render(){
   });
   // только корни стопок рисуем как элементы
   f.boxes.filter(isRoot).forEach(root => {
-    const chain = chainUp(root);
+    let cntN = 0, titleStr = '';
+    if(root.type === 'shelf'){
+      const ch = shelfBoxes(root);
+      cntN = ch.length;
+      titleStr = ch.length ? 'На стеллаже: ' + ch.map(b=>b.name).join(', ') : '';
+    } else {
+      const chain = chainUp(root);
+      if(chain.length > 1){ cntN = chain.length; titleStr = 'Стопка: ' + chain.map(b=>b.name).join(' → '); }
+    }
     const el = document.createElement('div');
-    el.className = 'box ' + root.type + (chain.length>1 ? ' stacked' : '');
+    el.className = 'box ' + root.type + (cntN && root.type!=='shelf' ? ' stacked' : '');
     el.style.cssText = `left:${root.x}px;top:${root.y}px;width:${bw(root)}px;height:${bh(root)}px;transform:rotate(${root.rot||0}deg)`;
     el.textContent = root.name;
     el.dataset.id = root.id;
-    if(chain.length>1){
-      const c = document.createElement('span'); c.className='cnt'; c.textContent = '×'+chain.length; el.appendChild(c);
-      el.title = 'Стопка: ' + chain.map(b=>b.name).join(' → ');
+    if(cntN){
+      const c = document.createElement('span'); c.className='cnt'; c.textContent = '×'+cntN; el.appendChild(c);
+      el.title = titleStr;
     }
     const rh = document.createElement('span'); rh.className='rh'; el.appendChild(rh);
     el.onclick = e => { if(el._moved || e.target===rh) return; openPanel(root); };
@@ -520,10 +539,17 @@ function dragBox(el, root, rh){
       document.querySelectorAll('.box.target').forEach(t=>t.classList.remove('target'));
       if(el._moved && over){
         const targetRoot = fl().boxes.find(b => b.id == over.dataset.id);
-        const tChain = chainUp(targetRoot), myChain = chainUp(root);
-        if(!myChain.some(b => tChain.includes(b))){
-          root.on = tChain[tChain.length-1].id; // моя стопка встаёт на верх целевой
+        if(root.type === 'shelf'){
+          // стеллаж ни на что не ставим
+        } else if(targetRoot.type === 'shelf'){
+          root.on = targetRoot.id; root.shelfLvl = 1; // коробка встаёт на 1-ю полку
           root.x = targetRoot.x; root.y = targetRoot.y;
+        } else {
+          const tChain = chainUp(targetRoot), myChain = chainUp(root);
+          if(!myChain.some(b => tChain.includes(b))){
+            root.on = tChain[tChain.length-1].id; // моя стопка встаёт на верх целевой
+            root.x = targetRoot.x; root.y = targetRoot.y;
+          }
         }
       }
       if(el._moved) root.m = Date.now();
@@ -551,23 +577,70 @@ function addBox(type){
 // --- панель ---
 function openPanel(b){
   current = b;
-  const chain = chainUp(b);
   const sl = document.getElementById('stackList');
+  const title = document.getElementById('stackTitle');
   sl.innerHTML = '';
-  document.getElementById('stackTitle').textContent = chain.length>1 ? `Стопка из ${chain.length} (снизу вверх)` : 'Объект';
-  chain.forEach((cb, i) => {
-    const d = document.createElement('div');
-    d.className = 'sitem' + (cb===current ? ' sel' : '');
-    d.innerHTML = `<span>${esc(cb.name)}</span><span class="lvl">ярус ${i+1}</span>`;
-    d.onclick = () => openPanel(cb);
+  const parent = parentOf(b);
+  const onShelf = parent && parent.type === 'shelf';
+  let canUnstack = false;
+  if(b.type === 'shelf'){
+    // стеллаж: показываем полки сверху вниз и коробки на них
+    sl.style.flexDirection = 'column';
+    const lv = b.levels || 3;
+    title.textContent = `Стеллаж — ${lv} полок`;
+    const ch = shelfBoxes(b);
+    for(let i = lv; i >= 1; i--){
+      const h = document.createElement('div'); h.className = 'shhdr'; h.textContent = 'Полка ' + i; sl.appendChild(h);
+      const onLvl = ch.filter(x => Math.min(x.shelfLvl||1, lv) === i);
+      if(!onLvl.length){ const e = document.createElement('div'); e.className='empty'; e.textContent='— пусто —'; sl.appendChild(e); }
+      onLvl.forEach(cb => {
+        const d = document.createElement('div'); d.className = 'sitem';
+        d.innerHTML = `<span>${esc(cb.name)}</span>`;
+        d.onclick = () => openPanel(cb);
+        sl.appendChild(d);
+      });
+    }
+  } else if(onShelf){
+    sl.style.flexDirection = 'column';
+    title.textContent = `На стеллаже ${parent.name}, полка ${b.shelfLvl||1}`;
+    const d = document.createElement('div'); d.className = 'sitem';
+    d.innerHTML = `<span>↩ ${esc(parent.name)} (весь стеллаж)</span>`;
+    d.onclick = () => openPanel(parent);
     sl.appendChild(d);
-  });
+    canUnstack = true;
+  } else {
+    sl.style.flexDirection = 'column-reverse';
+    const chain = chainUp(b);
+    title.textContent = chain.length>1 ? `Стопка из ${chain.length} (снизу вверх)` : 'Объект';
+    chain.forEach((cb, i) => {
+      const d = document.createElement('div');
+      d.className = 'sitem' + (cb===current ? ' sel' : '');
+      d.innerHTML = `<span>${esc(cb.name)}</span><span class="lvl">ярус ${i+1}</span>`;
+      d.onclick = () => openPanel(cb);
+      sl.appendChild(d);
+    });
+    canUnstack = chain.length > 1;
+  }
   document.getElementById('pName').value = b.name;
   document.getElementById('pType').value = b.type;
   document.getElementById('pW').value = bw(b);
   document.getElementById('pH').value = bh(b);
   document.getElementById('pItems').value = b.items;
-  document.getElementById('unstackBtn').style.display = (chain.length>1) ? '' : 'none';
+  // число полок — только для стеллажа
+  document.getElementById('lvlsRow').style.display = b.type==='shelf' ? '' : 'none';
+  if(b.type==='shelf') document.getElementById('pLevels').value = b.levels || 3;
+  // выбор полки — только для коробки на стеллаже
+  document.getElementById('lvlRow').style.display = onShelf ? '' : 'none';
+  if(onShelf){
+    const sel = document.getElementById('pLvl');
+    sel.innerHTML = '';
+    const lv = parent.levels || 3;
+    for(let i=1; i<=lv; i++){ const o = document.createElement('option'); o.value=i; o.textContent='Полка '+i; sel.appendChild(o); }
+    sel.value = Math.min(b.shelfLvl||1, lv);
+  }
+  const ub = document.getElementById('unstackBtn');
+  ub.style.display = canUnstack ? '' : 'none';
+  ub.textContent = onShelf ? '⤴ Снять со стеллажа' : '⤴ Снять со стопки';
   document.getElementById('panel').classList.add('open');
 }
 function closePanel(){ document.getElementById('panel').classList.remove('open'); current = null; }
@@ -578,16 +651,22 @@ function savePanel(){
   current.w = Math.max(14, parseInt(document.getElementById('pW').value) || bw(current));
   current.h = Math.max(14, parseInt(document.getElementById('pH').value) || bh(current));
   current.items = document.getElementById('pItems').value;
+  if(current.type === 'shelf') current.levels = Math.min(10, Math.max(1, parseInt(document.getElementById('pLevels').value) || 3));
+  const par = parentOf(current);
+  if(par && par.type === 'shelf') current.shelfLvl = parseInt(document.getElementById('pLvl').value) || 1;
   current.m = Date.now();
   save(); render(); openPanel(current);
 }
 function unstackCurrent(){
   if(!current) return;
   const boxes = fl().boxes;
-  const child = boxes.find(x => x.on === current.id);
-  if(child){ child.on = current.on; child.m = Date.now(); } // стопка над снятой коробкой опускается
+  const fromShelf = parentOf(current) && parentOf(current).type === 'shelf';
+  if(!fromShelf){
+    const child = boxes.find(x => x.on === current.id);
+    if(child){ child.on = current.on; child.m = Date.now(); } // стопка над снятой коробкой опускается
+  }
   const root = chainUp(current)[0];
-  current.on = null;
+  current.on = null; current.shelfLvl = null;
   current.x = root.x + 90; current.y = root.y + 30;
   current.m = Date.now();
   save(); render(); openPanel(current);
@@ -596,8 +675,16 @@ function deleteCurrent(){
   if(!current) return;
   if(!confirm('Удалить «' + current.name + '»? Содержимое будет потеряно.')) return;
   const boxes = fl().boxes;
-  const child = boxes.find(x => x.on === current.id);
-  if(child){ child.on = current.on; child.m = Date.now(); }
+  if(current.type === 'shelf'){ // коробки со стеллажа высыпаются рядом
+    boxes.filter(x => x.on === current.id).forEach((b, i) => {
+      b.on = null; b.shelfLvl = null;
+      b.x = current.x + 20 + i*44; b.y = current.y + 36;
+      b.m = Date.now();
+    });
+  } else {
+    const child = boxes.find(x => x.on === current.id);
+    if(child){ child.on = current.on; child.m = Date.now(); }
+  }
   (data.del = data.del || {})[current.id] = Date.now(); // надгробие, чтобы не воскресла при слиянии
   data.floors[data.cur].boxes = boxes.filter(b => b !== current);
   save(); renderAll(); closePanel();
@@ -625,12 +712,14 @@ function applySearch(){
     resEl.style.display = 'block';
     hits.forEach(h => {
       const realBox = data.floors[h._fl].boxes.find(x=>x.id===h.id);
+      const par = realBox.on != null ? data.floors[h._fl].boxes.find(x=>x.id===realBox.on) : null;
       const savedCur = data.cur; data.cur = h._fl;
       const chain = chainUp(realBox);
       data.cur = savedCur;
       const lvl = chain.indexOf(realBox);
       const line = (h.items.split('\n').find(l => l.toLowerCase().includes(q)) || '').trim();
-      const stackInfo = chain.length>1 ? ` · ярус ${lvl+1} из ${chain.length}` : '';
+      const stackInfo = (par && par.type==='shelf') ? ` · ${esc(par.name)}, полка ${realBox.shelfLvl||1}`
+        : (chain.length>1 ? ` · ярус ${lvl+1} из ${chain.length}` : '');
       const d = document.createElement('div');
       d.innerHTML = `<span class="fl">${PLANS[h._fl].name}</span> <b>${esc(h.name)}</b>${stackInfo}${line ? '<br>' + esc(line) : ''}`;
       d.onclick = () => {
