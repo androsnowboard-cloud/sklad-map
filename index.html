@@ -35,13 +35,19 @@
     border: 1px solid #8a5f2a; border-radius: 2px; cursor: nwse-resize; display: none; }
   .box:hover .rh { display: block; }
   .rm { position: absolute; border: 2px dashed #c2415a; border-radius: 4px; background: rgba(194,65,90,0.07); z-index: 5; pointer-events: none; }
-  .rm .rmh, .wall .we { display: none !important; }
+  body.edit .rm { pointer-events: auto; cursor: move; }
+  body.edit .wall { pointer-events: auto; cursor: move; }
+  body:not(.edit) .rm .rmh, body:not(.edit) .wall .we { display: none !important; }
+  .editonly { display: none; }
+  body.edit .editonly { display: inline-block; }
+  body.edit #editBtn { background: #c2415a; border-color: #c2415a; }
   .rm .rmlabel { position: absolute; top: 2px; left: 6px; font-size: 12px; font-weight: 700; color: #c2415a; pointer-events: none; white-space: nowrap; }
   .rm .rmh { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; background: #c2415a; border-radius: 3px; cursor: nwse-resize; }
   .txt { position: absolute; color: #1d2cc7; font-weight: 700; cursor: move; user-select: none; z-index: 6;
     text-shadow: 0 0 3px #fff, 0 0 3px #fff; white-space: pre; }
   .wall { position: absolute; background: #d8dce8; transform-origin: 0 50%; z-index: 7; border-radius: 2px;
     box-shadow: 0 0 4px rgba(0,0,0,.45); pointer-events: none; }
+  /* в режиме планировки коробки не мешают тянуть стены под ними */
   .wall .we { position: absolute; right: -7px; top: 50%; margin-top: -7px; width: 14px; height: 14px;
     background: #ffd24d; border: 2px solid #8a8fa3; border-radius: 50%; cursor: crosshair; opacity: 0; }
   .wall:hover .we { opacity: 1; }
@@ -85,7 +91,10 @@
   <button class="primary" onclick="addBox('box')">+ Коробка</button>
   <button onclick="addBox('pallet')">+ Паллета</button>
   <button onclick="addBox('shelf')">+ Стеллаж</button>
+  <button class="editonly" onclick="addRoom()">+ Помещение</button>
+  <button class="editonly" onclick="addWall()">+ Стена</button>
   <button onclick="addText()">+ Текст</button>
+  <button id="editBtn" onclick="document.body.classList.toggle('edit')" title="Режим редактирования планировки: стены и помещения можно двигать">✏ Планировка</button>
   <button onclick="exportData()">⬇ Экспорт</button>
   <button onclick="document.getElementById('file').click()">⬆ Импорт</button>
   <span id="sync">…</span>
