@@ -897,13 +897,13 @@ function findInMap(model){
     for(const b of (data.floors[fl].boxes||[])){
       if(b.type==='shelf' && b.lvlItems){
         for(const lvl of Object.keys(b.lvlItems)){
-          if(re.test(b.lvlItems[lvl]||'')) return { name:b.name+' · п'+lvl, fl, x:b.x, y:b.y, shelf:b.name, lvl };
+          if(re.test(b.lvlItems[lvl]||'')) return { name:b.name+' · п'+lvl, fl, x:b.x, y:b.y, shelf:b.name, lvl, id:b.id };
         }
       }
       if(re.test((b.name||'') + ' ' + (b.items||''))){
         const par = b.on!=null ? (data.floors[fl].boxes.find(x=>x.id===b.on)) : null;
         const X = par?par.x:b.x, Y = par?par.y:b.y;
-        return { name:b.name, fl, x:X, y:Y, shelf:b.name, lvl:null };
+        return { name:b.name, fl, x:X, y:Y, shelf:b.name, lvl:null, id:(par?par.id:b.id) };
       }
     }
   }
@@ -911,7 +911,7 @@ function findInMap(model){
 }
 function locLabel(model){
   const l = locOf(model);
-  if(l){ const s = shelfById(l.shelfId); if(s) return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name, lvl: l.lvl||null }; }
+  if(l){ const s = shelfById(l.shelfId); if(s) return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name, lvl: l.lvl||null, id: s.b.id }; }
   return findInMap(model); // не привязано явно — ищем в содержимом коробок/полок
 }
 
@@ -926,7 +926,7 @@ function routeFor(models){
     const l = locLabel(mm.model);
     if(!l){ return; }
     const key = l.fl+'|'+l.shelf+'|'+(l.lvl||'');
-    if(!byKey[key]){ byKey[key] = { fl:l.fl, x:l.x, y:l.y, label:l.name, models:[] }; stops.push(byKey[key]); }
+    if(!byKey[key]){ byKey[key] = { fl:l.fl, x:l.x, y:l.y, label:l.name, id:l.id, models:[] }; stops.push(byKey[key]); }
     byKey[key].models.push(mm);
   });
   // сгруппировать по этажам в порядке p,f1,f2 и внутри — ближайший сосед
@@ -959,7 +959,7 @@ function renderPick(){
     const allGot = sh.models.every(m=>got.has(sh.page+'|'+m.model));
     const card = document.createElement('div');
     card.className = 'sheet' + (allGot?' done':'');
-    let routeHtml = route.length ? '<div class="route">🚶 ' + route.map(s=>`<span class="seg">${esc(s.label)}</span>`).join(' → ') + '</div>' : '';
+    let routeHtml = route.length ? '<div class="route">🚶 ' + route.map(s=>`<span class="seg" onclick="gotoMap('${s.fl}',${Math.round(s.x)},${Math.round(s.y)},'${s.id}')">${esc(s.label)}</span>`).join(' → ') + '</div>' : '';
     let rowsHtml = '';
     // строки в порядке маршрута, потом неизвестные
     const ordered = [...route.flatMap(s=>s.models), ...unknown];
@@ -970,7 +970,8 @@ function renderPick(){
         <input type="checkbox" class="chk" ${isGot?'checked':''} onchange="toggleGot('${sh.page}','${esc(m.model)}',this.checked)">
         <span class="pm">${esc(m.model)}</span>
         <span class="pq">${m.qty}</span>
-        <span class="loc ${l?'set':'unset'}" onclick="openBind('${esc(m.model)}')">${l?esc(l.name):'❓ место'}</span>
+        <span class="loc ${l?'set':'unset'}" onclick="${l?`gotoMap('${l.fl}',${Math.round(l.x)},${Math.round(l.y)},'${l.id}')`:`openBind('${esc(m.model)}')`}">${l?esc(l.name):'❓ место'}</span>
+        ${l?`<span class="loc" style="border-color:#3a4258" onclick="openBind('${esc(m.model)}')">✏</span>`:''}
       </div>`;
     });
     card.innerHTML = `<div class="sh-head" onclick="this.parentNode.classList.toggle('exp')">
@@ -989,6 +990,18 @@ function toggleGot(page, model, on){
   renderPick();
 }
 function toggleAllSheets(){ document.querySelectorAll('#pick .sheet').forEach(c=>c.classList.toggle('exp')); }
+
+// переход из списка сборки на карту, подсветка стеллажа/коробки
+function gotoMap(fl, x, y, id){
+  closePick();
+  if(data.cur !== fl){ data.cur = fl; renderAll(); } else renderAll();
+  const area = document.getElementById('mapArea');
+  area.scrollTo({ left: Math.max(0, x - area.clientWidth/2), top: Math.max(0, y - area.clientHeight/2), behavior: 'smooth' });
+  if(id && id !== 'undefined'){
+    const el = [...document.querySelectorAll('.box')].find(e => e.dataset.id == id);
+    if(el){ el.classList.add('hit'); setTimeout(()=>el.classList.remove('hit'), 3500); }
+  }
+}
 
 // --- привязка модели к полке ---
 let bindModel = null, bindSel = { fl:null, shelfId:null, lvl:null };
