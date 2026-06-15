@@ -888,10 +888,31 @@ function parseOrder(text){
 function catalog(){ data.catalog = data.catalog || {}; return data.catalog; }
 function locOf(model){ return catalog()[model] || null; }
 function shelfById(id){ for(const k in data.floors){ const b=(data.floors[k].boxes||[]).find(x=>x.id===id); if(b) return {b, fl:k}; } return null; }
+function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+// ищем модель в содержимом коробок и в тексте полок стеллажей по всей карте
+function findInMap(model){
+  const pat = escRe(model).replace(/_/g,'[\\s_]+'); // подчёркивание = пробел или _
+  const re = new RegExp('(^|[^A-Za-z0-9_])' + pat + '([^A-Za-z0-9_]|$)', 'i');
+  for(const fl of ['p','f1','f2']){
+    for(const b of (data.floors[fl].boxes||[])){
+      if(b.type==='shelf' && b.lvlItems){
+        for(const lvl of Object.keys(b.lvlItems)){
+          if(re.test(b.lvlItems[lvl]||'')) return { name:b.name+' · п'+lvl, fl, x:b.x, y:b.y, shelf:b.name, lvl };
+        }
+      }
+      if(re.test((b.name||'') + ' ' + (b.items||''))){
+        const par = b.on!=null ? (data.floors[fl].boxes.find(x=>x.id===b.on)) : null;
+        const X = par?par.x:b.x, Y = par?par.y:b.y;
+        return { name:b.name, fl, x:X, y:Y, shelf:b.name, lvl:null };
+      }
+    }
+  }
+  return null;
+}
 function locLabel(model){
-  const l = locOf(model); if(!l) return null;
-  const s = shelfById(l.shelfId); if(!s) return null;
-  return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name };
+  const l = locOf(model);
+  if(l){ const s = shelfById(l.shelfId); if(s) return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name }; }
+  return findInMap(model); // не привязано явно — ищем в содержимом коробок/полок
 }
 
 // --- маршрут: ближайший сосед от входа, по этажам ---
