@@ -121,6 +121,26 @@
   #bindCard .seg-row button { flex: 1; min-width: 80px; }
   #bindCard .shelfbtn { display: block; width: 100%; text-align: left; margin-bottom: 5px; padding: 11px; }
   #bindCard .shelfbtn.sel { background: #3b6df0; border-color: #3b6df0; }
+  /* список активной сборки на карте */
+  #pickList { position: absolute; right: 10px; top: 10px; width: 240px; max-height: 72%; overflow-y: auto;
+    background: rgba(28,33,46,.97); border: 1px solid #3a4258; border-radius: 10px; z-index: 200; display: none; font-size: 13px; }
+  #pickList.show { display: block; }
+  #pickList .ph { padding: 9px 11px; border-bottom: 1px solid #2c3346; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: #232839; border-radius: 10px 10px 0 0; }
+  #pickList .ph b { font-size: 14px; }
+  #pickList .ph button { padding: 3px 9px; font-size: 13px; }
+  #pickList .pi { padding: 7px 11px; border-bottom: 1px solid #232839; display: flex; gap: 7px; align-items: center; cursor: pointer; }
+  #pickList .pi:hover { background: #2a3144; }
+  #pickList .pi.got { opacity: .45; }
+  #pickList .pi.got .nm { text-decoration: line-through; }
+  #pickList .pi .n { width: 19px; height: 19px; border-radius: 50%; background: #3b6df0; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; font-weight: 700; }
+  #pickList .pi .nm { flex: 1; }
+  #pickList .pi .q { color: #ffd24d; font-weight: 700; }
+  #pickList .pi .sh { color: #6fe06f; font-size: 11px; white-space: nowrap; }
+  #pickList .pi.miss .sh { color: #ffb24d; }
+  .routeline { position: absolute; left: 0; top: 0; z-index: 8; pointer-events: none; }
+  .routeline .rl { stroke: #ffb24d; stroke-width: 3; stroke-dasharray: 7 5; fill: none; opacity: .9; }
+  .routeline .rn { fill: #ff8a3b; }
+  .routeline text { fill: #fff; font-size: 12px; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -172,6 +192,7 @@
 <div id="wrap">
   <div id="mapArea">
     <div id="results"></div>
+    <div id="pickList"></div>
     <div id="map"></div>
   </div>
   <div id="panel">
@@ -520,6 +541,7 @@ function render(){
     map.appendChild(el);
   });
   applySearch();
+  drawRouteOverlay();
 }
 
 function dragGeneric(el, obj, handle){
@@ -976,7 +998,10 @@ function renderPick(){
     });
     card.innerHTML = `<div class="sh-head" onclick="this.parentNode.classList.toggle('exp')">
         <div><b>Лист ${sh.page}</b><br><span class="grp">${esc(sh.group||'—')}</span></div>
-        <span class="qty">${sh.units} шт</span>
+        <span style="display:flex;gap:8px;align-items:center">
+          <button onclick="event.stopPropagation();showOnMap(${si})" style="padding:5px 10px">🗺 Карта</button>
+          <span class="qty">${sh.units} шт</span>
+        </span>
       </div>
       <div class="sh-body">${routeHtml}${rowsHtml}</div>`;
     body.appendChild(card);
@@ -1001,6 +1026,87 @@ function gotoMap(fl, x, y, id){
     const el = [...document.querySelectorAll('.box')].find(e => e.dataset.id == id);
     if(el){ el.classList.add('hit'); setTimeout(()=>el.classList.remove('hit'), 3500); }
   }
+}
+
+// --- активная сборка: линии на карте + список в углу ---
+let activeRoute = null; // { page, group, stops:[...], items:[{model,qty,fl,x,y,id,label}] }
+function showOnMap(si){
+  const sh = order.sheets[si];
+  const route = routeFor(sh.models);
+  const items = [];
+  route.forEach(s => s.models.forEach(m => items.push({ model:m.model, qty:m.qty, fl:s.fl, x:s.x, y:s.y, id:s.id, label:s.label })));
+  sh.models.filter(m=>!locLabel(m.model)).forEach(m => items.push({ model:m.model, qty:m.qty, fl:null, label:null }));
+  activeRoute = { page: sh.page, group: sh.group, stops: route, items };
+  closePick();
+  const first = route[0];
+  if(first && data.cur !== first.fl) data.cur = first.fl;
+  renderAll();
+  renderPickList();
+  if(first){ const area=document.getElementById('mapArea');
+    area.scrollTo({ left: Math.max(0,first.x-area.clientWidth/2), top: Math.max(0,first.y-area.clientHeight/2), behavior:'smooth' }); }
+}
+function clearActivePick(){ activeRoute = null; renderAll(); document.getElementById('pickList').classList.remove('show'); }
+
+function drawRouteOverlay(){
+  if(!activeRoute) return;
+  const stops = activeRoute.stops.filter(s => s.fl === data.cur);
+  if(!stops.length) return;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('class','routeline');
+  svg.setAttribute('width', map.style.width || 2200);
+  svg.setAttribute('height', map.style.height || 1400);
+  const pts = stops.map(s => [Math.round(s.x)+25, Math.round(s.y)+15]);
+  const pl = document.createElementNS(ns,'polyline');
+  pl.setAttribute('class','rl');
+  pl.setAttribute('points', pts.map(p=>p.join(',')).join(' '));
+  svg.appendChild(pl);
+  pts.forEach((p,i) => {
+    const c = document.createElementNS(ns,'circle');
+    c.setAttribute('class','rn'); c.setAttribute('cx',p[0]); c.setAttribute('cy',p[1]); c.setAttribute('r',11);
+    svg.appendChild(c);
+    const t = document.createElementNS(ns,'text');
+    t.setAttribute('x',p[0]); t.setAttribute('y',p[1]+4); t.setAttribute('text-anchor','middle');
+    t.textContent = (i+1);
+    svg.appendChild(t);
+  });
+  map.appendChild(svg);
+}
+
+function renderPickList(){
+  const pl = document.getElementById('pickList');
+  if(!activeRoute){ pl.classList.remove('show'); return; }
+  const got = gotSet();
+  const flName = { p:'Подвал', f1:'1эт', f2:'2эт' };
+  let n = 0;
+  let html = `<div class="ph"><b>Лист ${activeRoute.page}</b><button onclick="clearActivePick()">✕</button></div>`;
+  activeRoute.items.forEach(it => {
+    const isGot = got.has(activeRoute.page+'|'+it.model);
+    const num = it.label ? (++n) : '•';
+    html += `<div class="pi${isGot?' got':''}${it.label?'':' miss'}">
+      <span class="n" onclick="pickRow('${esc(it.model)}','${it.fl||''}',${Math.round(it.x||0)},${Math.round(it.y||0)},'${it.id||''}')">${num}</span>
+      <span class="nm" onclick="pickRow('${esc(it.model)}','${it.fl||''}',${Math.round(it.x||0)},${Math.round(it.y||0)},'${it.id||''}')">${esc(it.model)}</span>
+      <span class="q">${it.qty}</span>
+      <span class="sh">${it.label?esc(it.label)+(it.fl!==data.cur?(' ('+flName[it.fl]+')'):''):'нет места'}</span>
+      <input type="checkbox" ${isGot?'checked':''} onchange="markGot('${esc(it.model)}',this.checked)">
+    </div>`;
+  });
+  pl.innerHTML = html;
+  pl.classList.add('show');
+}
+function pickRow(model, fl, x, y, id){
+  if(fl){ gotoMapKeepList(fl, x, y, id); }
+}
+function markGot(model, on){
+  const got = gotSet(); const k = activeRoute.page+'|'+model;
+  if(on) got.add(k); else got.delete(k);
+  gotSave(got); renderPickList();
+}
+function gotoMapKeepList(fl, x, y, id){
+  if(data.cur !== fl){ data.cur = fl; renderAll(); }
+  const area = document.getElementById('mapArea');
+  area.scrollTo({ left: Math.max(0,x-area.clientWidth/2), top: Math.max(0,y-area.clientHeight/2), behavior:'smooth' });
+  if(id){ const el=[...document.querySelectorAll('.box')].find(e=>e.dataset.id==id); if(el){ el.classList.add('hit'); setTimeout(()=>el.classList.remove('hit'),3000); } }
 }
 
 // --- привязка модели к полке ---
