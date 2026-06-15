@@ -19,7 +19,7 @@
   #tabs button.act { background: #3b6df0; border-color: #3b6df0; font-weight: 700; }
   #tabs .spacer { flex: 1; }
   #wrap { flex: 1; display: flex; overflow: hidden; }
-  #mapArea { flex: 1; overflow: auto; position: relative; background: #1a1f2b; }
+  #mapArea { flex: 1; overflow: auto; position: relative; background: #1a1f2b; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   #map { position: relative; }
   #map svg { position: absolute; left: 0; top: 0; }
   #map img.bg { position: absolute; left: 0; top: 0; opacity: .9; }
@@ -758,7 +758,12 @@ function importData(inp){
 
 renderAll();
 if(SKLAD_TOKEN) pullRemote(true); else askToken();
-if(window.Telegram && Telegram.WebApp){ Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
+if(window.Telegram && Telegram.WebApp){
+  const tg = Telegram.WebApp;
+  tg.ready(); tg.expand();
+  // не сворачивать аппку при прокрутке карты вниз
+  try { tg.disableVerticalSwipes(); } catch(e){}
+}
 </script>
 </body>
 </html>
