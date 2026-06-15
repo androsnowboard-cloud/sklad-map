@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Карта склада</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', sans-serif; background: #1e2330; color: #e8eaf0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -85,12 +86,48 @@
   .room { fill: rgba(90,110,170,0.06); stroke: #56608a; stroke-width: 1.5; }
   .rlabel { fill: #8d97c4; font-size: 13px; font-weight: 700; }
   .rarea { fill: #5f6a94; font-size: 10px; }
+  /* --- Сборка --- */
+  #pick { position: fixed; inset: 0; background: #1a1f2b; z-index: 500; display: none; flex-direction: column; }
+  #pick.open { display: flex; }
+  #pick header { background: #272d3d; }
+  #pickBody { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 10px 12px 40px; }
+  #pickBody .drop { border: 2px dashed #3a4258; border-radius: 12px; padding: 36px 16px; text-align: center; color: #99a3c8; margin: 20px auto; max-width: 480px; }
+  #pickBody .summary { color: #99a3c8; font-size: 13px; margin: 4px 0 12px; }
+  .sheet { border: 1px solid #3a4258; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+  .sheet .sh-head { padding: 11px 13px; background: #272d3d; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .sheet .sh-head b { font-size: 15px; }
+  .sheet .sh-head .grp { color: #8d97c4; font-size: 12px; }
+  .sheet .sh-head .qty { background: #3b6df0; color: #fff; border-radius: 12px; padding: 2px 10px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .sheet.done .sh-head { opacity: .5; }
+  .sheet .sh-body { display: none; padding: 6px 0; }
+  .sheet.exp .sh-body { display: block; }
+  .route { padding: 8px 13px; font-size: 12px; color: #6fe06f; border-bottom: 1px solid #2c3346; line-height: 1.7; }
+  .route .seg { background: #233; border: 1px solid #2f5; border-radius: 6px; padding: 1px 6px; margin: 0 2px; white-space: nowrap; }
+  .prow { display: flex; align-items: center; gap: 10px; padding: 9px 13px; border-bottom: 1px solid #232839; }
+  .prow:last-child { border-bottom: none; }
+  .prow .pm { flex: 1; font-size: 14px; }
+  .prow .pq { font-weight: 700; color: #ffd24d; min-width: 28px; text-align: right; }
+  .prow .loc { font-size: 12px; padding: 4px 9px; border-radius: 7px; border: 1px solid #3a4258; background: #232839; cursor: pointer; white-space: nowrap; }
+  .prow .loc.set { color: #6fe06f; border-color: #2f6f3a; }
+  .prow .loc.unset { color: #ffb24d; border-color: #6a5a2a; }
+  .prow.got .pm { text-decoration: line-through; opacity: .5; }
+  .prow .chk { width: 22px; height: 22px; flex: none; }
+  #bind { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 600; display: none; align-items: flex-end; }
+  #bind.open { display: flex; }
+  #bindCard { background: #272d3d; width: 100%; max-height: 80%; overflow-y: auto; border-radius: 16px 16px 0 0; padding: 16px; }
+  #bindCard h3 { font-size: 16px; margin-bottom: 4px; }
+  #bindCard .sub { color: #8d97c4; font-size: 12px; margin-bottom: 12px; }
+  #bindCard .seg-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  #bindCard .seg-row button { flex: 1; min-width: 80px; }
+  #bindCard .shelfbtn { display: block; width: 100%; text-align: left; margin-bottom: 5px; padding: 11px; }
+  #bindCard .shelfbtn.sel { background: #3b6df0; border-color: #3b6df0; }
 </style>
 </head>
 <body>
 <header>
   <h1>📦 Карта склада</h1>
   <input type="search" id="q" placeholder="Поиск по всем этажам: подшипники, болты М8...">
+  <button class="primary" onclick="openPick()">📋 Сборка</button>
   <button class="primary" onclick="addBox('box')">+ Коробка</button>
   <button onclick="addBox('pallet')">+ Паллета</button>
   <button onclick="addBox('shelf')">+ Стеллаж</button>
@@ -105,6 +142,33 @@
 </header>
 <div id="tabs"></div>
 <div id="hint">Коробка на коробку = стопка (×N) • клик — содержимое, там же поворот и размер • жёлтый уголок при наведении — растянуть мышью • помещения/текст: двойной клик — переименовать, пустое имя — удалить • «Экспорт» = резервная копия</div>
+<div id="pick">
+  <header>
+    <h1>📋 Сборка</h1>
+    <button class="primary" onclick="document.getElementById('pdf').click()">⬆ Загрузить PDF</button>
+    <input type="file" id="pdf" accept="application/pdf" style="display:none" onchange="loadPdf(this)">
+    <button onclick="toggleAllSheets()">Свернуть/развернуть</button>
+    <span style="flex:1"></span>
+    <button onclick="closePick()">✕ Закрыть</button>
+  </header>
+  <div id="pickBody">
+    <div class="drop">Нажми «⬆ Загрузить PDF» и выбери файл задания на печать.<br>Появится список листов с маршрутом сборки.</div>
+  </div>
+</div>
+<div id="bind">
+  <div id="bindCard">
+    <h3 id="bindTitle">Где лежит?</h3>
+    <div class="sub" id="bindSub"></div>
+    <div class="seg-row" id="bindFloors"></div>
+    <div id="bindShelves"></div>
+    <div class="seg-row" id="bindLevels" style="display:none"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" onclick="bindSave()">Сохранить</button>
+      <button onclick="bindClear()">Не знаю / очистить</button>
+      <button onclick="closeBind()">Отмена</button>
+    </div>
+  </div>
+</div>
 <div id="wrap">
   <div id="mapArea">
     <div id="results"></div>
@@ -242,6 +306,11 @@ function mergeData(remote){
       if(rf.texts) lf.texts = rf.texts;
       if(rf.bgImg !== undefined) lf.bgImg = rf.bgImg;
     }
+  }
+  // каталог модель→полка: объединяем ключи, на конфликте побеждает более свежая сторона
+  if(remote.catalog){
+    data.catalog = remoteNewer ? {...(data.catalog||{}), ...remote.catalog}
+                               : {...remote.catalog, ...(data.catalog||{})};
   }
   if(remoteNewer) data.ts = remote.ts;
   if((remote.seq||0) > (data.seq||0)) data.seq = remote.seq;
@@ -755,6 +824,203 @@ function importData(inp){
     inp.value = '';
   });
 }
+
+// ===================== СБОРКА (picking) =====================
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let order = null; // {sheets:[{page,group,models:[{model,qty}]}], total, units}
+
+function openPick(){ document.getElementById('pick').classList.add('open'); if(order) renderPick(); }
+function closePick(){ document.getElementById('pick').classList.remove('open'); }
+
+async function loadPdf(inp){
+  const f = inp.files[0]; if(!f) return;
+  const body = document.getElementById('pickBody');
+  body.innerHTML = '<div class="drop">Читаю PDF…</div>';
+  try {
+    const buf = await f.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let text = '';
+    for(let i=1; i<=pdf.numPages; i++){
+      const pg = await pdf.getPage(i);
+      const c = await pg.getTextContent();
+      // восстановим строки по координате Y
+      let lines = {}, order2 = [];
+      c.items.forEach(it => {
+        const y = Math.round(it.transform[5]);
+        if(!(y in lines)){ lines[y] = ''; order2.push(y); }
+        lines[y] += it.str;
+      });
+      order2.sort((a,b)=>b-a);
+      text += order2.map(y=>lines[y]).join('\n') + '\n';
+    }
+    order = parseOrder(text);
+    localStorage.setItem('sklad-order', JSON.stringify(order));
+    renderPick();
+  } catch(e){ body.innerHTML = '<div class="drop">Не удалось прочитать PDF: ' + esc(e.message) + '</div>'; }
+  inp.value = '';
+}
+
+function parseOrder(text){
+  const lines = text.split('\n').map(s=>s.trim());
+  const sheets = [];
+  let cur = null, inGroup = false;
+  for(const ln of lines){
+    let m;
+    if(m = ln.match(/Страница\s*-\s*(\d+)/)){
+      cur = { page: m[1], group: '', models: [] }; sheets.push(cur); inGroup = false; continue;
+    }
+    if(!cur) continue;
+    if(m = ln.match(/Группа печати\s*:\s*(.+)/)){ cur.group = m[1].trim(); inGroup = true; continue; }
+    if(/^(Модели:|Статус листа|Пропуски столбцов|Перезапуск|Страница)/.test(ln)){ inGroup = false; }
+    else if(inGroup && ln && !/^©/.test(ln)){ cur.group += ' ' + ln; continue; } // продолжение названия группы
+    if(m = ln.match(/^([A-Za-z][A-Za-z0-9_]*)\s*-\s*(\d+)$/)){
+      cur.models.push({ model: m[1], qty: parseInt(m[2]) });
+    }
+  }
+  const filtered = sheets.filter(s=>s.models.length);
+  let total = 0, units = 0; const seen = new Set();
+  filtered.forEach(s=>{ s.units = s.models.reduce((a,b)=>a+b.qty,0); units += s.units;
+    s.models.forEach(x=>seen.add(x.model)); });
+  return { sheets: filtered, total: seen.size, units };
+}
+
+// --- каталог модель -> {fl, shelfId, lvl} ---
+function catalog(){ data.catalog = data.catalog || {}; return data.catalog; }
+function locOf(model){ return catalog()[model] || null; }
+function shelfById(id){ for(const k in data.floors){ const b=(data.floors[k].boxes||[]).find(x=>x.id===id); if(b) return {b, fl:k}; } return null; }
+function locLabel(model){
+  const l = locOf(model); if(!l) return null;
+  const s = shelfById(l.shelfId); if(!s) return null;
+  return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name };
+}
+
+// --- маршрут: ближайший сосед от входа, по этажам ---
+function entrancePt(fl){
+  const t = (data.floors[fl].texts||[]).find(x=>/вход|ворота/i.test(x.text));
+  return t ? {x:t.x, y:t.y} : {x:0, y:0};
+}
+function routeFor(models){
+  const stops = []; const byKey = {};
+  models.forEach(mm=>{
+    const l = locLabel(mm.model);
+    if(!l){ return; }
+    const key = l.fl+'|'+l.shelf+'|'+(locOf(mm.model).lvl||'');
+    if(!byKey[key]){ byKey[key] = { fl:l.fl, x:l.x, y:l.y, label:l.name, models:[] }; stops.push(byKey[key]); }
+    byKey[key].models.push(mm);
+  });
+  // сгруппировать по этажам в порядке p,f1,f2 и внутри — ближайший сосед
+  const order3 = ['p','f1','f2'];
+  const result = [];
+  order3.forEach(fl=>{
+    let pool = stops.filter(s=>s.fl===fl);
+    if(!pool.length) return;
+    let cur = entrancePt(fl);
+    while(pool.length){
+      let bi=0, bd=Infinity;
+      pool.forEach((s,i)=>{ const d=(s.x-cur.x)**2+(s.y-cur.y)**2; if(d<bd){bd=d;bi=i;} });
+      const s = pool.splice(bi,1)[0]; result.push(s); cur = s;
+    }
+  });
+  return result;
+}
+
+function gotSet(){ try { return new Set(JSON.parse(localStorage.getItem('sklad-got')||'[]')); } catch(e){ return new Set(); } }
+function gotSave(s){ localStorage.setItem('sklad-got', JSON.stringify([...s])); }
+
+function renderPick(){
+  const body = document.getElementById('pickBody');
+  if(!order){ body.innerHTML = '<div class="drop">Загрузи PDF задания.</div>'; return; }
+  const got = gotSet();
+  body.innerHTML = `<div class="summary">Листов: <b>${order.sheets.length}</b> · моделей: <b>${order.total}</b> · чехлов: <b>${order.units}</b></div>`;
+  order.sheets.forEach((sh, si) => {
+    const route = routeFor(sh.models);
+    const unknown = sh.models.filter(m=>!locLabel(m.model));
+    const allGot = sh.models.every(m=>got.has(sh.page+'|'+m.model));
+    const card = document.createElement('div');
+    card.className = 'sheet' + (allGot?' done':'');
+    let routeHtml = route.length ? '<div class="route">🚶 ' + route.map(s=>`<span class="seg">${esc(s.label)}</span>`).join(' → ') + '</div>' : '';
+    let rowsHtml = '';
+    // строки в порядке маршрута, потом неизвестные
+    const ordered = [...route.flatMap(s=>s.models), ...unknown];
+    ordered.forEach(m => {
+      const l = locLabel(m.model);
+      const isGot = got.has(sh.page+'|'+m.model);
+      rowsHtml += `<div class="prow${isGot?' got':''}">
+        <input type="checkbox" class="chk" ${isGot?'checked':''} onchange="toggleGot('${sh.page}','${esc(m.model)}',this.checked)">
+        <span class="pm">${esc(m.model)}</span>
+        <span class="pq">${m.qty}</span>
+        <span class="loc ${l?'set':'unset'}" onclick="openBind('${esc(m.model)}')">${l?esc(l.name):'❓ место'}</span>
+      </div>`;
+    });
+    card.innerHTML = `<div class="sh-head" onclick="this.parentNode.classList.toggle('exp')">
+        <div><b>Лист ${sh.page}</b><br><span class="grp">${esc(sh.group||'—')}</span></div>
+        <span class="qty">${sh.units} шт</span>
+      </div>
+      <div class="sh-body">${routeHtml}${rowsHtml}</div>`;
+    body.appendChild(card);
+  });
+}
+
+function toggleGot(page, model, on){
+  const s = gotSet(); const k = page+'|'+model;
+  if(on) s.add(k); else s.delete(k); gotSave(s);
+  // обновим класс строки и «done» без полной перерисовки
+  renderPick();
+}
+function toggleAllSheets(){ document.querySelectorAll('#pick .sheet').forEach(c=>c.classList.toggle('exp')); }
+
+// --- привязка модели к полке ---
+let bindModel = null, bindSel = { fl:null, shelfId:null, lvl:null };
+function openBind(model){
+  bindModel = model;
+  const ex = locOf(model);
+  bindSel = ex ? {...ex} : { fl:data.cur, shelfId:null, lvl:null };
+  document.getElementById('bindTitle').textContent = 'Где лежит ' + model + '?';
+  document.getElementById('bindSub').textContent = 'Выбери этаж, стеллаж и полку';
+  const fr = document.getElementById('bindFloors'); fr.innerHTML='';
+  [['p','Подвал'],['f1','1 этаж'],['f2','2 этаж']].forEach(([k,n])=>{
+    const b=document.createElement('button'); b.textContent=n;
+    if(bindSel.fl===k) b.classList.add('primary');
+    b.onclick=()=>{ bindSel.fl=k; bindSel.shelfId=null; bindSel.lvl=null; openBindRefresh(); };
+    fr.appendChild(b);
+  });
+  openBindRefresh();
+  document.getElementById('bind').classList.add('open');
+}
+function openBindRefresh(){
+  document.querySelectorAll('#bindFloors button').forEach((b,i)=>{
+    b.classList.toggle('primary', ['p','f1','f2'][i]===bindSel.fl);
+  });
+  const sd = document.getElementById('bindShelves'); sd.innerHTML='';
+  const shelves = (data.floors[bindSel.fl]?.boxes||[]).filter(x=>x.type==='shelf');
+  if(!shelves.length){ sd.innerHTML='<div class="sub">На этом этаже нет стеллажей. Добавь их на карте.</div>'; }
+  shelves.forEach(s=>{
+    const b=document.createElement('button'); b.className='shelfbtn'+(bindSel.shelfId===s.id?' sel':'');
+    b.textContent=s.name+' ('+(s.levels||3)+' полок)';
+    b.onclick=()=>{ bindSel.shelfId=s.id; bindSel.lvl=bindSel.lvl||1; renderBindLevels(); openBindRefresh(); };
+    sd.appendChild(b);
+  });
+  renderBindLevels();
+}
+function renderBindLevels(){
+  const lr=document.getElementById('bindLevels');
+  if(!bindSel.shelfId){ lr.style.display='none'; return; }
+  const sh=(data.floors[bindSel.fl].boxes).find(x=>x.id===bindSel.shelfId);
+  const lv=sh.levels||3; lr.style.display='flex'; lr.innerHTML='';
+  for(let i=1;i<=lv;i++){ const b=document.createElement('button'); b.textContent='Полка '+i;
+    if(bindSel.lvl===i) b.classList.add('primary');
+    b.onclick=()=>{ bindSel.lvl=i; renderBindLevels(); }; lr.appendChild(b); }
+}
+function bindSave(){
+  if(!bindSel.shelfId){ alert('Выбери стеллаж'); return; }
+  catalog()[bindModel] = { fl:bindSel.fl, shelfId:bindSel.shelfId, lvl:bindSel.lvl||1 };
+  save(); closeBind(); renderPick();
+}
+function bindClear(){ delete catalog()[bindModel]; save(); closeBind(); renderPick(); }
+function closeBind(){ document.getElementById('bind').classList.remove('open'); }
+
+// восстановить заказ из прошлой сессии
+try { const o = JSON.parse(localStorage.getItem('sklad-order')||'null'); if(o&&o.sheets) order=o; } catch(e){}
 
 renderAll();
 if(SKLAD_TOKEN) pullRemote(true); else askToken();
