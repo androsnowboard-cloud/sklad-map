@@ -911,7 +911,7 @@ function findInMap(model){
 }
 function locLabel(model){
   const l = locOf(model);
-  if(l){ const s = shelfById(l.shelfId); if(s) return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name }; }
+  if(l){ const s = shelfById(l.shelfId); if(s) return { name: s.b.name + (l.lvl?(' · п'+l.lvl):''), fl: s.fl, x: s.b.x, y: s.b.y, shelf: s.b.name, lvl: l.lvl||null }; }
   return findInMap(model); // не привязано явно — ищем в содержимом коробок/полок
 }
 
@@ -925,7 +925,7 @@ function routeFor(models){
   models.forEach(mm=>{
     const l = locLabel(mm.model);
     if(!l){ return; }
-    const key = l.fl+'|'+l.shelf+'|'+(locOf(mm.model).lvl||'');
+    const key = l.fl+'|'+l.shelf+'|'+(l.lvl||'');
     if(!byKey[key]){ byKey[key] = { fl:l.fl, x:l.x, y:l.y, label:l.name, models:[] }; stops.push(byKey[key]); }
     byKey[key].models.push(mm);
   });
