@@ -34,7 +34,10 @@
     border-radius: 9px; padding: 0 4px; border: 1px solid #1a1f2b; }
   .box .rh { position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px; background: #ffd24d;
     border: 1px solid #8a5f2a; border-radius: 2px; cursor: nwse-resize; display: none; }
-  .box:hover .rh { display: block; }
+  .box { cursor: pointer; }
+  body.movebox .box { cursor: grab; }
+  body.movebox .box:hover .rh { display: block; }
+  body.movebox #moveBtn { background: #c2415a; border-color: #c2415a; }
   .rm { position: absolute; border: 2px dashed #c2415a; border-radius: 4px; background: rgba(194,65,90,0.07); z-index: 5; pointer-events: none; }
   body.edit .rm { pointer-events: auto; cursor: move; }
   body.edit .wall { pointer-events: auto; cursor: move; }
@@ -154,6 +157,7 @@
   <button class="editonly" onclick="addRoom()">+ Помещение</button>
   <button class="editonly" onclick="addWall()">+ Стена</button>
   <button onclick="addText()">+ Текст</button>
+  <button id="moveBtn" onclick="document.body.classList.toggle('movebox')" title="Режим перемещения: коробки и стеллажи можно двигать и менять размер">✋ Двигать</button>
   <button id="editBtn" onclick="document.body.classList.toggle('edit')" title="Режим редактирования планировки: стены и помещения можно двигать">✏ Планировка</button>
   <button onclick="exportData()">⬇ Экспорт</button>
   <button onclick="document.getElementById('file').click()">⬆ Импорт</button>
@@ -591,6 +595,7 @@ function rotCur(deg){
 
 function dragBox(el, root, rh){
   el.onpointerdown = e => {
+    if(!document.body.classList.contains('movebox')) return; // двигать только в режиме «✋ Двигать»
     if(rh && e.target === rh){ // изменение размера
       const sx = e.clientX, sy = e.clientY, ow = bw(root), oh = bh(root);
       const mm = e2 => {
