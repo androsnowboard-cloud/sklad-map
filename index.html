@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=6, user-scalable=yes">
 <title>Карта склада</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -144,6 +145,13 @@
   .routeline .rl { stroke: #ffb24d; stroke-width: 3; stroke-dasharray: 7 5; fill: none; opacity: .9; }
   .routeline .rn { fill: #ff8a3b; }
   .routeline text { fill: #fff; font-size: 12px; font-weight: 700; }
+  /* на телефоне панель ввода — нижняя шторка, всегда в видимой зоне */
+  @media (max-width: 760px){
+    #panel { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-height: 74vh;
+      border-left: none; border-top: 2px solid #3b6df0; border-radius: 16px 16px 0 0; z-index: 450;
+      box-shadow: 0 -8px 24px rgba(0,0,0,.55); }
+    #pickList { width: 64%; max-width: 240px; }
+  }
 </style>
 </head>
 <body>
@@ -734,8 +742,23 @@ function openPanel(b){
   ub.style.display = canUnstack ? '' : 'none';
   ub.textContent = onShelf ? '⤴ Снять со стеллажа' : '⤴ Снять со стопки';
   document.getElementById('panel').classList.add('open');
+  pinPanel();
 }
-function closePanel(){ document.getElementById('panel').classList.remove('open'); current = null; }
+function closePanel(){ const p=document.getElementById('panel'); p.classList.remove('open'); p.style.transform=''; p.style.width=''; current = null; }
+
+// привязка нижней шторки к видимой области (чтобы при зуме страницы панель была под рукой)
+function pinPanel(){
+  const vv = window.visualViewport, p = document.getElementById('panel');
+  if(!vv || !p.classList.contains('open')) return;
+  if(window.innerWidth > 760){ p.style.transform=''; p.style.width=''; return; }
+  const scale = vv.scale || 1;
+  const layoutH = document.documentElement.clientHeight;
+  const dy = -(layoutH - (vv.offsetTop + vv.height));
+  p.style.transformOrigin = 'left bottom';
+  p.style.width = (vv.width * scale) + 'px';
+  p.style.transform = `translate(${vv.offsetLeft}px, ${dy}px) scale(${1/scale})`;
+}
+if(window.visualViewport){ visualViewport.addEventListener('resize', pinPanel); visualViewport.addEventListener('scroll', pinPanel); }
 function savePanel(){
   if(!current) return;
   current.name = document.getElementById('pName').value.trim() || current.name;
