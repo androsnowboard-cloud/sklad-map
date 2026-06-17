@@ -11,7 +11,7 @@
   body { font-family: 'Segoe UI', sans-serif; background: #1e2330; color: #e8eaf0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
   header { display: flex; gap: 8px; align-items: center; padding: 8px 14px; background: #272d3d; border-bottom: 1px solid #3a4258; flex-wrap: wrap; }
   header h1 { font-size: 15px; margin-right: 8px; white-space: nowrap; }
-  input[type=search] { flex: 1; min-width: 160px; padding: 8px 12px; border-radius: 8px; border: 1px solid #3a4258; background: #1e2330; color: #e8eaf0; font-size: 14px; }
+  input[type=search] { flex: 1; min-width: 160px; padding: 8px 12px; border-radius: 8px; border: 1px solid #3a4258; background: #1e2330; color: #e8eaf0; font-size: 16px; }
   button { padding: 7px 11px; border-radius: 8px; border: 1px solid #3a4258; background: #323a4f; color: #e8eaf0; cursor: pointer; font-size: 13px; white-space: nowrap; }
   button:hover { background: #3e4760; }
   button.primary { background: #3b6df0; border-color: #3b6df0; }
@@ -66,7 +66,9 @@
   #panel { width: 330px; background: #272d3d; border-left: 1px solid #3a4258; padding: 14px; overflow-y: auto; display: none; flex-direction: column; gap: 10px; }
   #panel.open { display: flex; }
   #panel label { font-size: 12px; color: #99a3c8; }
-  #panel input, #panel textarea, #panel select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #3a4258; background: #1e2330; color: #e8eaf0; font-size: 14px; }
+  #panel input, #panel textarea, #panel select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #3a4258; background: #1e2330; color: #e8eaf0; font-size: 16px; }
+  /* 16px на всех полях ввода — иначе iOS сам зумит страницу при фокусе и не возвращает */
+  input, textarea, select { font-size: 16px; }
   #panel textarea { min-height: 160px; resize: vertical; font-family: inherit; }
   .row { display: flex; gap: 8px; }
   .row > * { flex: 1; }
@@ -789,23 +791,30 @@ function unstackCurrent(){
   current.m = Date.now();
   save(); render(); openPanel(current);
 }
+function confirmDo(msg, cb){
+  if(window.Telegram && Telegram.WebApp && Telegram.WebApp.showConfirm){
+    Telegram.WebApp.showConfirm(msg, ok => { if(ok) cb(); });
+  } else if(confirm(msg)) cb();
+}
 function deleteCurrent(){
   if(!current) return;
-  if(!confirm('Удалить «' + current.name + '»? Содержимое будет потеряно.')) return;
-  const boxes = fl().boxes;
-  if(current.type === 'shelf'){ // коробки со стеллажа высыпаются рядом
-    boxes.filter(x => x.on === current.id).forEach((b, i) => {
-      b.on = null; b.shelfLvl = null;
-      b.x = current.x + 20 + i*44; b.y = current.y + 36;
-      b.m = Date.now();
-    });
-  } else {
-    const child = boxes.find(x => x.on === current.id);
-    if(child){ child.on = current.on; child.m = Date.now(); }
-  }
-  (data.del = data.del || {})[current.id] = Date.now(); // надгробие, чтобы не воскресла при слиянии
-  data.floors[data.cur].boxes = boxes.filter(b => b !== current);
-  save(); renderAll(); closePanel();
+  const victim = current;
+  confirmDo('Удалить «' + victim.name + '»? Содержимое будет потеряно.', () => {
+    const boxes = fl().boxes;
+    if(victim.type === 'shelf'){ // коробки со стеллажа высыпаются рядом
+      boxes.filter(x => x.on === victim.id).forEach((b, i) => {
+        b.on = null; b.shelfLvl = null;
+        b.x = victim.x + 20 + i*44; b.y = victim.y + 36;
+        b.m = Date.now();
+      });
+    } else {
+      const child = boxes.find(x => x.on === victim.id);
+      if(child){ child.on = victim.on; child.m = Date.now(); }
+    }
+    (data.del = data.del || {})[victim.id] = Date.now(); // надгробие, чтобы не воскресла при слиянии
+    data.floors[data.cur].boxes = boxes.filter(b => b !== victim);
+    save(); renderAll(); closePanel();
+  });
 }
 
 function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
