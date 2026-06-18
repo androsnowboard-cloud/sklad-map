@@ -22,7 +22,10 @@
   #tabs .spacer { flex: 1; }
   #wrap { flex: 1; display: flex; overflow: hidden; }
   #mapArea { flex: 1; overflow: auto; position: relative; background: #1a1f2b; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-  #map { position: relative; }
+  #mapSizer { position: relative; }
+  #map { position: relative; transform-origin: 0 0; }
+  #zoomBtns { position: absolute; left: 10px; bottom: 14px; z-index: 150; display: flex; flex-direction: column; gap: 6px; }
+  #zoomBtns button { width: 38px; height: 38px; font-size: 20px; padding: 0; border-radius: 9px; background: rgba(40,46,62,.95); }
   #map svg { position: absolute; left: 0; top: 0; }
   #map img.bg { position: absolute; left: 0; top: 0; opacity: .9; }
   .box { position: absolute; width: 38px; height: 28px; background: #b07c3f; border: 1px solid #8a5f2a; border-radius: 4px;
@@ -207,7 +210,8 @@
   <div id="mapArea">
     <div id="results"></div>
     <div id="pickList"></div>
-    <div id="map"></div>
+    <div id="zoomBtns"><button onclick="zoomStep(1.25)">＋</button><button onclick="zoomStep(0.8)">－</button><button onclick="zoomReset()">⟳</button></div>
+    <div id="mapSizer"><div id="map"></div></div>
   </div>
   <div id="panel">
     <label id="stackTitle">Стопка (снизу вверх)</label>
@@ -456,7 +460,7 @@ function render(){
   const bg = f.bgImg || PLAN_IMG[data.cur];
   if(bg && bg.startsWith('data:')){
     const img = document.createElement('img'); img.className='bg'; img.src = bg;
-    img.onload = () => { map.style.width = Math.max(img.naturalWidth, 1200)+'px'; map.style.height = Math.max(img.naturalHeight, 800)+'px'; };
+    img.onload = () => { map.style.width = Math.max(img.naturalWidth, 1200)+'px'; map.style.height = Math.max(img.naturalHeight, 800)+'px'; applyZoom(); };
     map.appendChild(img);
     map.style.width = '1600px'; map.style.height = '1200px';
   } else {
@@ -494,7 +498,7 @@ function render(){
       const mr = map.getBoundingClientRect();
       if(e.target === we){ // тянем конец: длина + угол
         const mm = e2 => {
-          const px = e2.clientX - mr.left, py = e2.clientY - mr.top;
+          const px = (e2.clientX - mr.left)/mapZoom, py = (e2.clientY - mr.top)/mapZoom;
           w.len = Math.max(10, Math.hypot(px - w.x, py - w.y));
           w.ang = Math.atan2(py - w.y, px - w.x) * 180 / Math.PI;
           if(e2.shiftKey) w.ang = Math.round(w.ang / 15) * 15; // Shift — шаг 15°
@@ -505,7 +509,7 @@ function render(){
       } else { // перенос целиком
         const sx = e.clientX, sy = e.clientY, ox = w.x, oy = w.y;
         const mm = e2 => {
-          w.x = ox + e2.clientX - sx; w.y = oy + e2.clientY - sy;
+          w.x = ox + (e2.clientX - sx)/mapZoom; w.y = oy + (e2.clientY - sy)/mapZoom;
           el.style.left = w.x+'px'; el.style.top = (w.y - (w.th||5)/2)+'px';
         };
         const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); save(); };
@@ -556,6 +560,7 @@ function render(){
   });
   applySearch();
   drawRouteOverlay();
+  applyZoom();
 }
 
 function dragGeneric(el, obj, handle){
@@ -564,7 +569,7 @@ function dragGeneric(el, obj, handle){
     const sx = e.clientX, sy = e.clientY;
     const ox = resizing ? obj.w : obj.x, oy = resizing ? obj.h : obj.y;
     const mm = e2 => {
-      const dx = e2.clientX-sx, dy = e2.clientY-sy;
+      const dx = (e2.clientX-sx)/mapZoom, dy = (e2.clientY-sy)/mapZoom;
       if(resizing){ obj.w = Math.max(40, ox+dx); obj.h = Math.max(30, oy+dy);
         el.style.width = obj.w+'px'; el.style.height = obj.h+'px'; }
       else { obj.x = Math.max(0, ox+dx); obj.y = Math.max(0, oy+dy);
@@ -577,23 +582,51 @@ function dragGeneric(el, obj, handle){
   };
 }
 
+// --- собственный зум карты (на ПК — вместо зума всей страницы) ---
+let mapZoom = 1;
+function applyZoom(){
+  const m = document.getElementById('map'), sz = document.getElementById('mapSizer');
+  const w = parseFloat(m.style.width)||2200, h = parseFloat(m.style.height)||1400;
+  m.style.transform = 'scale('+mapZoom+')';
+  sz.style.width = (w*mapZoom)+'px'; sz.style.height = (h*mapZoom)+'px';
+}
+function zoomAt(factor, vx, vy){
+  const area = document.getElementById('mapArea');
+  if(vx==null) vx = area.clientWidth/2;
+  if(vy==null) vy = area.clientHeight/2;
+  const contentX = (area.scrollLeft + vx)/mapZoom;
+  const contentY = (area.scrollTop + vy)/mapZoom;
+  mapZoom = Math.min(4, Math.max(0.25, mapZoom*factor));
+  applyZoom();
+  area.scrollLeft = contentX*mapZoom - vx;
+  area.scrollTop  = contentY*mapZoom - vy;
+}
+function zoomStep(f){ zoomAt(f); }
+function zoomReset(){ mapZoom = 1; applyZoom(); }
+document.getElementById('mapArea').addEventListener('wheel', e => {
+  if(!(e.ctrlKey || e.metaKey)) return; // обычная прокрутка не трогается
+  e.preventDefault();
+  const rect = e.currentTarget.getBoundingClientRect();
+  zoomAt(e.deltaY < 0 ? 1.12 : 0.89, e.clientX-rect.left, e.clientY-rect.top);
+}, { passive:false });
+
 function addRoom(){
   const name = prompt('Название помещения:', 'Комната');
   if(!name) return;
   const area = document.getElementById('mapArea');
-  fl().rooms.push({ name, x: area.scrollLeft+100, y: area.scrollTop+100, w: 220, h: 150 });
+  fl().rooms.push({ name, x: area.scrollLeft/mapZoom+100, y: area.scrollTop/mapZoom+100, w: 220, h: 150 });
   save(); render();
 }
 function addWall(){
   const area = document.getElementById('mapArea');
-  fl().walls.push({ x: area.scrollLeft+120, y: area.scrollTop+120, len: 150, ang: 0, th: 5 });
+  fl().walls.push({ x: area.scrollLeft/mapZoom+120, y: area.scrollTop/mapZoom+120, len: 150, ang: 0, th: 5 });
   save(); render();
 }
 function addText(){
   const text = prompt('Текст подписи:', '');
   if(!text) return;
   const area = document.getElementById('mapArea');
-  fl().texts.push({ text, x: area.scrollLeft+120, y: area.scrollTop+120, size: 16 });
+  fl().texts.push({ text, x: area.scrollLeft/mapZoom+120, y: area.scrollTop/mapZoom+120, size: 16 });
   save(); render();
 }
 function rotCur(deg){
@@ -609,8 +642,8 @@ function dragBox(el, root, rh){
     if(rh && e.target === rh){ // изменение размера
       const sx = e.clientX, sy = e.clientY, ow = bw(root), oh = bh(root);
       const mm = e2 => {
-        root.w = Math.max(14, ow + e2.clientX - sx);
-        root.h = Math.max(14, oh + e2.clientY - sy);
+        root.w = Math.max(14, ow + (e2.clientX - sx)/mapZoom);
+        root.h = Math.max(14, oh + (e2.clientY - sy)/mapZoom);
         el.style.width = root.w+'px'; el.style.height = root.h+'px';
       };
       const mu = () => { document.removeEventListener('pointermove', mm); document.removeEventListener('pointerup', mu); root.m = Date.now(); save(); render(); };
@@ -622,8 +655,8 @@ function dragBox(el, root, rh){
     el._moved = false;
     let over = null;
     const mm = e2 => {
-      const dx = e2.clientX-sx, dy = e2.clientY-sy;
-      if(Math.abs(dx)+Math.abs(dy) > 3) el._moved = true;
+      const dx = (e2.clientX-sx)/mapZoom, dy = (e2.clientY-sy)/mapZoom;
+      if((Math.abs(dx)+Math.abs(dy))*mapZoom > 3) el._moved = true;
       root.x = Math.max(0, ox+dx); root.y = Math.max(0, oy+dy);
       el.style.left = root.x+'px'; el.style.top = root.y+'px';
       // подсветка цели для штабеля
@@ -672,7 +705,7 @@ function addBox(type){
   // id должен быть уникален между устройствами, поэтому не используем счётчик
   const b = { id: 'b' + Date.now() + Math.random().toString(36).slice(2,6), m: Date.now(),
     type, name: (type==='shelf'?'СТ-':type==='pallet'?'П-':'К-') + data.seq,
-    x: area.scrollLeft + 80 + (data.seq%6)*78, y: area.scrollTop + 80 + (data.seq%4)*58, items: '', on: null };
+    x: area.scrollLeft/mapZoom + 80 + (data.seq%6)*78, y: area.scrollTop/mapZoom + 80 + (data.seq%4)*58, items: '', on: null };
   fl().boxes.push(b);
   save(); renderAll();
   openPanel(b);
@@ -860,7 +893,7 @@ function applySearch(){
         if(data.cur !== h._fl){ data.cur = h._fl; save(); renderAll(); }
         const root = chainUp(data.floors[h._fl].boxes.find(x=>x.id===h.id))[0];
         const area = document.getElementById('mapArea');
-        area.scrollTo({ left: root.x - area.clientWidth/2, top: root.y - area.clientHeight/2, behavior: 'smooth' });
+        area.scrollTo({ left: root.x*mapZoom - area.clientWidth/2, top: root.y*mapZoom - area.clientHeight/2, behavior: 'smooth' });
       };
       resEl.appendChild(d);
     });
@@ -1058,7 +1091,7 @@ function gotoMap(fl, x, y, id){
   closePick();
   if(data.cur !== fl){ data.cur = fl; renderAll(); } else renderAll();
   const area = document.getElementById('mapArea');
-  area.scrollTo({ left: Math.max(0, x - area.clientWidth/2), top: Math.max(0, y - area.clientHeight/2), behavior: 'smooth' });
+  area.scrollTo({ left: Math.max(0, x*mapZoom - area.clientWidth/2), top: Math.max(0, y*mapZoom - area.clientHeight/2), behavior: 'smooth' });
   if(id && id !== 'undefined'){
     const el = [...document.querySelectorAll('.box')].find(e => e.dataset.id == id);
     if(el){ el.classList.add('hit'); setTimeout(()=>el.classList.remove('hit'), 3500); }
@@ -1080,7 +1113,7 @@ function showOnMap(si){
   renderAll();
   renderPickList();
   if(first){ const area=document.getElementById('mapArea');
-    area.scrollTo({ left: Math.max(0,first.x-area.clientWidth/2), top: Math.max(0,first.y-area.clientHeight/2), behavior:'smooth' }); }
+    area.scrollTo({ left: Math.max(0,first.x*mapZoom-area.clientWidth/2), top: Math.max(0,first.y*mapZoom-area.clientHeight/2), behavior:'smooth' }); }
 }
 function clearActivePick(){ activeRoute = null; renderAll(); document.getElementById('pickList').classList.remove('show'); }
 
@@ -1142,7 +1175,7 @@ function markGot(model, on){
 function gotoMapKeepList(fl, x, y, id){
   if(data.cur !== fl){ data.cur = fl; renderAll(); }
   const area = document.getElementById('mapArea');
-  area.scrollTo({ left: Math.max(0,x-area.clientWidth/2), top: Math.max(0,y-area.clientHeight/2), behavior:'smooth' });
+  area.scrollTo({ left: Math.max(0,x*mapZoom-area.clientWidth/2), top: Math.max(0,y*mapZoom-area.clientHeight/2), behavior:'smooth' });
   if(id){ const el=[...document.querySelectorAll('.box')].find(e=>e.dataset.id==id); if(el){ el.classList.add('hit'); setTimeout(()=>el.classList.remove('hit'),3000); } }
 }
 
