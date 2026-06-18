@@ -242,6 +242,7 @@
       <button onclick="closePanel()">Закрыть</button>
     </div>
     <button onclick="unstackCurrent()" id="unstackBtn">⤴ Снять со стопки</button>
+    <button onclick="duplicateCurrent()">⧉ Дублировать</button>
     <button class="danger" onclick="deleteCurrent()">Удалить объект</button>
   </div>
 </div>
@@ -828,6 +829,19 @@ function confirmDo(msg, cb){
   if(window.Telegram && Telegram.WebApp && Telegram.WebApp.showConfirm){
     Telegram.WebApp.showConfirm(msg, ok => { if(ok) cb(); });
   } else if(confirm(msg)) cb();
+}
+function duplicateCurrent(){
+  if(!current) return;
+  data.seq++;
+  const copy = JSON.parse(JSON.stringify(current));
+  copy.id = 'b' + Date.now() + Math.random().toString(36).slice(2,6);
+  copy.m = Date.now();
+  copy.on = null; copy.shelfLvl = null; // копия кладётся на пол, не в стопку/на стеллаж
+  copy.x = (current.x||0) + 24; copy.y = (current.y||0) + 24;
+  copy.name = current.name + ' (копия)';
+  fl().boxes.push(copy);
+  save(); renderAll();
+  openPanel(copy);
 }
 function deleteCurrent(){
   if(!current) return;
