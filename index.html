@@ -870,11 +870,12 @@ function esc(s){ const d = document.createElement('div'); d.textContent = s; ret
 const qEl = document.getElementById('q'), resEl = document.getElementById('results');
 qEl.oninput = applySearch;
 function applySearch(){
-  const q = qEl.value.trim().toLowerCase();
+  const norm = s => s.toLowerCase().replace(/[_\s]+/g,' ').trim(); // _ и пробел — одно и то же
+  const q = norm(qEl.value);
   resEl.innerHTML = ''; resEl.style.display = 'none';
   const els = map.querySelectorAll('.box');
   if(!q){ els.forEach(e => e.classList.remove('hit','dim')); return; }
-  const hay = b => (b.name + ' ' + b.items + ' ' + Object.values(b.lvlItems||{}).join('\n')).toLowerCase();
+  const hay = b => norm(b.name + ' ' + b.items + ' ' + Object.values(b.lvlItems||{}).join('\n'));
   const hits = allBoxes().filter(b => hay(b).includes(q));
   // подсветка на текущем этаже: подсвечиваем корень стопки, где лежит найденная
   const hitRoots = new Set();
@@ -892,12 +893,12 @@ function applySearch(){
       const chain = chainUp(realBox);
       data.cur = savedCur;
       const lvl = chain.indexOf(realBox);
-      let line = (h.items.split('\n').find(l => l.toLowerCase().includes(q)) || '').trim();
+      let line = (h.items.split('\n').find(l => norm(l).includes(q)) || '').trim();
       let stackInfo = (par && par.type==='shelf') ? ` · наверху ${esc(par.name)}`
         : (chain.length>1 ? ` · ярус ${lvl+1} из ${chain.length}` : '');
       if(!line && realBox.lvlItems){ // совпадение в тексте полки стеллажа
         for(const [lv2, txt] of Object.entries(realBox.lvlItems)){
-          const l2 = txt.split('\n').find(l => l.toLowerCase().includes(q));
+          const l2 = txt.split('\n').find(l => norm(l).includes(q));
           if(l2){ line = l2.trim(); stackInfo = ` · полка ${lv2}`; break; }
         }
       }
