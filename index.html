@@ -423,7 +423,7 @@ function renderTabs(){
     const btn = document.createElement('button');
     btn.className = k===data.cur ? 'act' : '';
     btn.textContent = PLANS[k].name + (n ? ` (${n})` : '');
-    btn.onclick = () => { data.cur = k; save(); renderAll(); };
+    btn.onclick = () => { data.cur = k; save(); wantFit = true; renderAll(); fitZoom(); };
     t.appendChild(btn);
   }
   const sp = document.createElement('div'); sp.className='spacer'; t.appendChild(sp);
@@ -461,7 +461,7 @@ function render(){
   const bg = f.bgImg || PLAN_IMG[data.cur];
   if(bg && bg.startsWith('data:')){
     const img = document.createElement('img'); img.className='bg'; img.src = bg;
-    img.onload = () => { map.style.width = Math.max(img.naturalWidth, 1200)+'px'; map.style.height = Math.max(img.naturalHeight, 800)+'px'; applyZoom(); };
+    img.onload = () => { map.style.width = Math.max(img.naturalWidth, 1200)+'px'; map.style.height = Math.max(img.naturalHeight, 800)+'px'; applyZoom(); if(wantFit){ wantFit=false; fitZoom(); } };
     map.appendChild(img);
     map.style.width = '1600px'; map.style.height = '1200px';
   } else {
@@ -584,7 +584,7 @@ function dragGeneric(el, obj, handle){
 }
 
 // --- собственный зум карты (на ПК — вместо зума всей страницы) ---
-let mapZoom = 1;
+let mapZoom = 1, wantFit = false;
 function applyZoom(){
   const m = document.getElementById('map'), sz = document.getElementById('mapSizer');
   const w = parseFloat(m.style.width)||2200, h = parseFloat(m.style.height)||1400;
@@ -597,13 +597,21 @@ function zoomAt(factor, vx, vy){
   if(vy==null) vy = area.clientHeight/2;
   const contentX = (area.scrollLeft + vx)/mapZoom;
   const contentY = (area.scrollTop + vy)/mapZoom;
-  mapZoom = Math.min(4, Math.max(0.25, mapZoom*factor));
+  mapZoom = Math.min(4, Math.max(0.1, mapZoom*factor));
   applyZoom();
   area.scrollLeft = contentX*mapZoom - vx;
   area.scrollTop  = contentY*mapZoom - vy;
 }
 function zoomStep(f){ zoomAt(f); }
-function zoomReset(){ mapZoom = 1; applyZoom(); }
+function fitZoom(){
+  const area = document.getElementById('mapArea'), m = document.getElementById('map');
+  const w = parseFloat(m.style.width)||2200, h = parseFloat(m.style.height)||1400;
+  const z = Math.min(area.clientWidth/w, area.clientHeight/h);
+  mapZoom = Math.min(1, Math.max(0.1, z*0.98));
+  applyZoom();
+  area.scrollLeft = 0; area.scrollTop = 0;
+}
+function zoomReset(){ fitZoom(); }
 document.getElementById('mapArea').addEventListener('wheel', e => {
   if(!(e.ctrlKey || e.metaKey)) return; // обычная прокрутка не трогается
   e.preventDefault();
@@ -1249,6 +1257,7 @@ try { const o = JSON.parse(localStorage.getItem('sklad-order')||'null'); if(o&&o
 
 renderAll();
 if(SKLAD_TOKEN) pullRemote(true); else askToken();
+wantFit = true; fitZoom(); setTimeout(fitZoom, 200); // вписать карту в экран при запуске
 if(window.Telegram && Telegram.WebApp){
   const tg = Telegram.WebApp;
   tg.ready(); tg.expand();
